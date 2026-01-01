@@ -4,7 +4,7 @@ import pandas as pd
 import numpy as np
 
 # --- CONFIGURATION ---
-st.set_page_config(page_title="AlphaValue - Stock Picker", layout="wide")
+st.set_page_config(page_title="FHi - Stock Picker", layout="wide")
 
 # --- FONCTIONS ---
 def get_stock_data(ticker):
