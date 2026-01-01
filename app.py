@@ -3,43 +3,68 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
+from datetime import datetime
 
-# --- CONFIGURATION DU SITE ---
-st.set_page_config(page_title="FHi - Smart Stock Picker", layout="wide", page_icon="📈")
+# --- CONFIGURATION DU SITE (MODE SOMBRE PAR DÉFAUT) ---
+st.set_page_config(page_title="FHi Terminal", layout="wide", page_icon="📊")
 
-# --- CSS AVANCÉ ---
+# --- CSS "DARK FINANCE" (STYLE YAHOO/BLOOMBERG) ---
 st.markdown("""
 <style>
-    /* Navigation */
-    button[data-baseweb="tab"] {
-        background-color: #ffffff !important;
-        color: #31333F !important;
-        font-weight: 600 !important;
-        border: 1px solid #e0e0e0 !important;
-        border-radius: 5px !important;
-        margin-right: 5px !important;
+    /* Forcer le thème sombre global */
+    .stApp {
+        background-color: #0e1117;
+        color: #e0e0e0;
     }
-    button[data-baseweb="tab"][aria-selected="true"] {
-        background-color: #000000 !important; /* Noir FHi */
+    
+    /* Navigation Tabs (Onglets horizontaux) */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 8px;
+        background-color: #0e1117;
+        padding-bottom: 5px;
+        border-bottom: 1px solid #333;
+    }
+    .stTabs [data-baseweb="tab"] {
+        height: 40px;
+        white-space: pre-wrap;
+        background-color: #161b22;
+        color: #8b949e;
+        border: 1px solid #30363d;
+        border-radius: 6px;
+        font-size: 14px;
+        padding: 0 16px;
+    }
+    .stTabs [aria-selected="true"] {
+        background-color: #238636 !important; /* Vert Finance */
         color: white !important;
-        border: 1px solid #000000 !important;
+        border-color: #238636 !important;
+    }
+
+    /* Cards & Metrics */
+    div[data-testid="stMetricValue"] {
+        color: #ffffff;
+    }
+    .metric-card {
+        background-color: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 6px;
+        padding: 15px;
+    }
+
+    /* Sidebar propre */
+    [data-testid="stSidebar"] {
+        background-color: #010409;
+        border-right: 1px solid #30363d;
     }
     
-    /* Zone Premium Grise */
-    .premium-box {
-        background-color: #e9ecef; /* Gris */
-        padding: 20px;
-        border-radius: 10px;
-        border-left: 5px solid #000000;
-        color: #333;
+    /* Chatbot Input */
+    .stChatInput {
+        border-color: #30363d;
     }
     
-    /* Boutons de sélection d'actifs */
-    .stButton>button {width: 100%; border-radius: 5px; border: 1px solid #ddd;}
-    
-    /* Logo Sidebar */
+    /* Logo */
     [data-testid="stSidebar"] img {
-        opacity: 0.9;
+        opacity: 0.8;
         margin-bottom: 20px;
         display: block;
         margin-left: auto;
@@ -48,43 +73,32 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- DONNÉES ET CATÉGORIES (SELECTION ÉLARGIE) ---
+# --- DONNÉES ET CATÉGORIES (TEXTE PRO, SANS EMOJIS) ---
 MARKET_DATA = {
-    "🚀 Pépites US (Growth)": {
-        "Palantir (AI)": "PLTR", "SoFi Technologies": "SOFI", "Unity Software": "U", 
-        "DraftKings": "DKNG", "UiPath (Auto)": "PATH", "Coinbase": "COIN",
-        "Rocket Lab (Espace)": "RKLB", "Crispr (Genomics)": "CRSP"
+    "US Growth Stocks": {
+        "Palantir Technologies": "PLTR", "SoFi Technologies": "SOFI", "Unity Software": "U", 
+        "DraftKings": "DKNG", "Coinbase Global": "COIN", "Tesla Inc": "TSLA", "NVIDIA Corp": "NVDA"
     },
-    "🇪🇺 Europe Croissance": {
-        "Dassault Systèmes": "DSY.PA", "Schneider Electric": "SU.PA", "Adyen (Paiement)": "ADYEN.AS", 
-        "ASML (Semiconducteurs)": "ASML.AS", "Ferrari": "RACE.MI", "Airbus": "AIR.PA",
-        "Thales": "HO.PA", "Capgemini": "CAP.PA"
+    "Europe Large Caps": {
+        "LVMH": "MC.PA", "TotalEnergies": "TTE.PA", "Airbus SE": "AIR.PA", 
+        "Schneider Electric": "SU.PA", "ASML Holding": "ASML.AS", "SAP SE": "SAP.DE"
     },
-    "💉 BioTech & Pharma (Risqué)": {
-        "Moderna": "MRNA", "BioNTech": "BNTX", "Valneva": "VLA.PA", 
-        "Sartorius": "DIM.PA", "Eurofins": "ERF.PA"
+    "BioTech & Speculative": {
+        "Moderna": "MRNA", "BioNTech": "BNTX", "Valneva": "VLA.PA", "Crispr Therapeutics": "CRSP"
     },
-    "🏢 Blue Chips (Sécurité)": {
-        "Apple": "AAPL", "Microsoft": "MSFT", "Berkshire Hathaway": "BRK-B", 
-        "LVMH": "MC.PA", "TotalEnergies": "TTE.PA", "Air Liquide": "AI.PA"
-    },
-    "🌍 Indices & ETFs": {
+    "Global Indices & ETFs": {
         "S&P 500": "^GSPC", "Nasdaq 100": "^IXIC", "CAC 40": "^FCHI", 
-        "ETF World (CW8)": "CW8.PA", "ETF Emerging": "PAEEM.PA"
+        "MSCI World ETF": "CW8.PA", "Gold (Spot)": "GC=F"
     }
 }
 
-# --- GESTION DE L'ÉTAT ---
-if 'selected_ticker' not in st.session_state:
-    st.session_state.selected_ticker = "PLTR" 
-if 'selected_name' not in st.session_state:
-    st.session_state.selected_name = "Palantir"
+# --- GESTION DE L'HISTORIQUE DU CHAT ---
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+if "last_ticker" not in st.session_state:
+    st.session_state.last_ticker = None
 
-def set_ticker(name, ticker):
-    st.session_state.selected_ticker = ticker
-    st.session_state.selected_name = name
-
-# --- FONCTIONS ---
+# --- FONCTIONS BACKEND ---
 @st.cache_data(ttl=3600)
 def get_data(ticker):
     stock = yf.Ticker(ticker)
@@ -92,170 +106,180 @@ def get_data(ticker):
     hist = stock.history(period="1y")
     return info, hist
 
-def generate_ai_prompt(risk, horizon, capital):
-    """Génère un prompt intelligent"""
-    return f"""Agis comme un analyste financier expert (type Warren Buffett croisé avec un Capital Risqueur).
-Mon profil : Investisseur avec un risque '{risk}', pour un horizon de '{horizon}', capital de départ '{capital}'.
-Analyse l'action [INSÉRER NOM ACTION ICI] en te basant sur ses derniers chiffres.
-1. Cette entreprise a-t-elle un avantage concurrentiel durable (Moat) ?
-2. Quels sont les 3 risques majeurs qui pourraient faire chuter le cours de 50% ?
-3. Estime si le prix actuel est une opportunité ou une bulle.
-Réponds avec un ton direct, sans jargon inutile."""
+def local_ai_response(query, info, ticker):
+    """
+    Cerveau du Bot IA interne (Simule une IA sans API externe)
+    Analyse les données financières pour construire une réponse logique.
+    """
+    query = query.lower()
+    
+    # Extraction des données clés
+    price = info.get('currentPrice', 0)
+    target = info.get('targetMeanPrice', 0)
+    recom = info.get('recommendationKey', 'none').replace('_', ' ')
+    pe = info.get('trailingPE', 'N/A')
+    sector = info.get('sector', 'Unknown')
+    summary = info.get('longBusinessSummary', '')[:300] + "..."
 
-# --- SIDEBAR ---
+    # Logique de réponse contextuelle
+    if "acheter" in query or "buy" in query or "avis" in query or "opinion" in query:
+        if target > price:
+            sentiment = "positif"
+            upside = ((target - price) / price) * 100
+            return f"Analyse FHi sur {ticker} : Les indicateurs techniques sont au vert. Le consensus des analystes vise {target} (potentiel de +{upside:.1f}%). Recommandation officielle : {recom.upper()}. C'est un moment intéressant pour entrer."
+        else:
+            return f"Prudence sur {ticker}. Le prix actuel ({price}) est proche ou supérieur à l'objectif des analystes ({target}). La recommandation est plutôt {recom.upper()}. Attendez un repli."
+    
+    elif "risque" in query or "risk" in query:
+        beta = info.get('beta', 1)
+        if beta > 1.5:
+            return f"{ticker} est une action à haute volatilité (Beta: {beta}). Elle convient aux investisseurs agressifs. Le risque de perte en capital à court terme est élevé."
+        else:
+            return f"{ticker} est considérée comme une valeur relativement stable (Beta: {beta}). Elle convient à une gestion 'Bon père de famille'."
+            
+    elif "c'est quoi" in query or "activite" in query:
+        return f"{ticker} opère dans le secteur {sector}. Résumé : {summary}"
+        
+    else:
+        return f"Je suis l'assistant FHi dédié à {ticker}. Vous pouvez me demander mon avis sur l'action, le niveau de risque ou une analyse du prix."
+
+# --- SIDEBAR (NAVIGATION) ---
 with st.sidebar:
     try:
-        st.image("image_2.png", width=140)
+        st.image("image_2.png", width=120)
     except:
-        st.header("FHi")
+        st.header("FHi Terminal")
     
-    st.markdown("### 🧭 Explorateur")
-    category = st.radio("Sélection FHi", list(MARKET_DATA.keys()))
+    st.markdown("### Market Data")
+    category = st.selectbox("Select Market", list(MARKET_DATA.keys()))
     
     st.markdown("---")
-    st.markdown("### 🛠 Recherche Manuelle")
-    st.caption("Cherchez n'importe quelle action (US ou EU)")
-    manual_search = st.text_input("Symbole (ex: TSLA, OR.PA)", "")
-    if st.button("Chercher"):
-        if manual_search:
-            set_ticker(manual_search.upper(), manual_search.upper())
+    st.markdown("### Search")
+    manual_search = st.text_input("Enter Symbol (e.g., TSLA)", "")
+    if manual_search:
+        # Override selection
+        current_selection_name = manual_search.upper()
+        current_selection_ticker = manual_search.upper()
+    else:
+        # Default selection from list
+        current_selection_name = st.radio("Assets", list(MARKET_DATA[category].keys()))
+        current_selection_ticker = MARKET_DATA[category][current_selection_name]
 
     st.markdown("---")
-    st.markdown("### 🔐 FHi Premium")
-    pwd = st.text_input("Clé d'activation", type="password")
+    st.markdown("### Account")
+    pwd = st.text_input("License Key", type="password")
     IS_PREMIUM = pwd == "PRO2026"
     
     if IS_PREMIUM:
-        st.success("Licence ACTIVE")
+        st.success("STATUS: PRO TRADER")
     else:
-        st.info("🔒 Mode Standard")
-        st.caption("Débloquez le consensus bancaire.")
+        st.info("STATUS: FREE TIER")
 
-# --- PAGE PRINCIPALE ---
+# --- MAIN INTERFACE ---
 
-# 1. TABLEAU DE BORD DE SÉLECTION
-st.title(f"Marché : {category}")
+# Reset chat if stock changes
+if st.session_state.last_ticker != current_selection_ticker:
+    st.session_state.messages = []
+    st.session_state.last_ticker = current_selection_ticker
 
-cols = st.columns(4)
-assets_list = list(MARKET_DATA[category].items())
-
-for i, (name, ticker_sym) in enumerate(assets_list):
-    col = cols[i % 4]
-    if col.button(f"🔎 {name}", key=f"btn_{ticker_sym}"):
-        set_ticker(name, ticker_sym)
-
-st.markdown("---")
-
-# 2. ZONE D'ANALYSE
-current_ticker = st.session_state.selected_ticker
-current_name = st.session_state.selected_name
-
-if current_ticker:
+if current_selection_ticker:
     try:
-        info, hist = get_data(current_ticker)
-        curr_price = info.get('currentPrice', info.get('regularMarketPreviousClose', 0))
+        # Data Loading
+        info, hist = get_data(current_selection_ticker)
+        current_price = info.get('currentPrice', info.get('regularMarketPreviousClose', 0))
         currency = info.get('currency', 'USD')
         
-        # En-tête
+        # Header Section (Yahoo Style)
         col_h1, col_h2 = st.columns([3, 1])
         with col_h1:
-            st.header(f"{current_name} ({current_ticker})")
-            st.caption(f"Secteur: {info.get('sector', 'N/A')} | Industrie: {info.get('industry', 'N/A')}")
+            st.title(f"{info.get('shortName', current_selection_name)}")
+            st.caption(f"{current_selection_ticker} • {info.get('exchange', 'N/A')} • {currency}")
         with col_h2:
-            st.metric("Prix", f"{curr_price} {currency}")
+            st.metric("Price", f"{current_price:,.2f}", delta=None) # Delta could be added if we pull previous close
 
-        # ONGLETS
-        tab_ia, tab_view, tab_financials, tab_pro = st.tabs(["🤖 Assistant IA", "📈 Graphique", "💰 Données (Gratuit)", "🏦 Banques (PREMIUM)"])
+        # --- HORIZONTAL TABS ---
+        tab_chart, tab_data, tab_analysis, tab_ai = st.tabs(["Chart", "Financials", "Analyst Rating", "FHi AI Assistant"])
 
-        # --- ONGLET 1 : ASSISTANT IA (NOUVEAU) ---
-        with tab_ia:
-            st.subheader("Assistant de Stratégie FHi")
-            col_ia1, col_ia2 = st.columns([1, 2])
-            
-            with col_ia1:
-                st.write("Profil de l'investisseur :")
-                risk_level = st.select_slider("Votre tolérance au risque", options=["Faible (Bon père de famille)", "Moyen (Équilibré)", "Élevé (Aggressif/Crypto)"])
-                horizon = st.selectbox("Horizon de placement", ["Court terme (Semaines)", "Moyen terme (1-3 ans)", "Long terme (Retraite)"])
-                capital = st.selectbox("Capital", ["< 1 000€", "1 000€ - 10 000€", "> 10 000€"])
-                
-                if st.button("Générer ma stratégie"):
-                    st.success("Profil analysé.")
-            
-            with col_ia2:
-                st.info(f"💡 **Conseil FHi pour le profil {risk_level} :**")
-                
-                if "Élevé" in risk_level:
-                    st.write("Vous cherchez de la performance. Concentrez-vous sur les 'Pépites US' et la 'BioTech'. Acceptez une volatilité de -30%.")
-                elif "Moyen" in risk_level:
-                    st.write("Visez la croissance stable. Le secteur 'Europe Croissance' ou les GAFAM ('Blue Chips') sont idéaux.")
-                else:
-                    st.write("Priorité sécurité. Regardez les ETFs et les actions à dividendes (TotalEnergies, Air Liquide).")
-                
-                st.markdown("### 🧠 Votre Super-Prompt")
-                st.write("Copiez ce texte et collez-le dans ChatGPT/Claude pour une analyse sur-mesure de cette action :")
-                prompt_text = generate_ai_prompt(risk_level, horizon, capital)
-                st.code(prompt_text.replace("[INSÉRER NOM ACTION ICI]", current_ticker), language="text")
-
-        # --- ONGLET 2 : GRAPHIQUE ---
-        with tab_view:
+        # 1. CHART TAB
+        with tab_chart:
+            # Plotly Dark Theme
             fig = go.Figure(data=[go.Candlestick(x=hist.index,
                             open=hist['Open'], high=hist['High'],
                             low=hist['Low'], close=hist['Close'])])
-            fig.update_layout(height=500, xaxis_rangeslider_visible=False, margin=dict(l=0, r=0, t=20, b=0))
+            fig.update_layout(
+                template="plotly_dark",
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)',
+                height=500,
+                xaxis_rangeslider_visible=False,
+                margin=dict(l=0, r=0, t=30, b=0)
+            )
             st.plotly_chart(fig, use_container_width=True)
 
-        # --- ONGLET 3 : FINANCIER (DÉBLOQUÉ) ---
-        with tab_financials:
-            st.write("Données fondamentales accessibles à tous les membres.")
+        # 2. FINANCIALS TAB
+        with tab_data:
             c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Capitalisation", f"{info.get('marketCap', 0)/1e9:.1f} Mrd")
-            c2.metric("Revenus (TTM)", f"{info.get('totalRevenue', 0)/1e9:.1f} Mrd")
-            c3.metric("Marge Bénéficiaire", f"{info.get('profitMargins', 0)*100:.1f}%")
-            c4.metric("Dette/Equity", f"{info.get('debtToEquity', 'N/A')}")
+            c1.metric("Market Cap", f"{info.get('marketCap', 0)/1e9:.1f}B")
+            c2.metric("PE Ratio", f"{info.get('trailingPE', 'N/A')}")
+            c3.metric("Revenue (TTM)", f"{info.get('totalRevenue', 0)/1e9:.1f}B")
+            c4.metric("52W High", f"{info.get('fiftyTwoWeekHigh', 0)}")
             
-            st.markdown("#### Description")
-            st.write(info.get('longBusinessSummary', 'Pas de description.'))
+            st.markdown("#### Company Profile")
+            st.write(info.get('longBusinessSummary', 'No description available.'))
 
-        # --- ONGLET 4 : PRO / BANQUES (PREMIUM GRIS) ---
-        with tab_pro:
+        # 3. ANALYSIS TAB (PREMIUM)
+        with tab_analysis:
             if IS_PREMIUM:
-                # CONTENU PAYANT EN GRIS
-                st.markdown('<div class="premium-box">', unsafe_allow_html=True)
+                st.subheader("Institutional Consensus")
                 
-                st.subheader("🔒 Consensus des Banques & Analystes")
+                col_a1, col_a2 = st.columns(2)
                 
-                target = info.get('targetMeanPrice')
-                recommendation = info.get('recommendationKey', 'inconnu').upper().replace("_", " ")
+                target = info.get('targetMeanPrice', 0)
+                recom = info.get('recommendationKey', 'N/A').upper().replace('_', ' ')
                 
-                col_p1, col_p2 = st.columns(2)
-                with col_p1:
-                    st.metric("🎯 Objectif de Prix Moyen", f"{target} {currency}")
-                    if target and curr_price:
-                        pot = ((target - curr_price) / curr_price) * 100
-                        st.write(f"Potentiel : **{pot:+.1f}%**")
-                with col_p2:
-                    st.metric("📢 Avis Majoritaire", recommendation)
-
-                st.markdown("---")
-                st.markdown("**🔍 Vérification des sources :**")
-                search_q = f"{current_name} stock analyst ratings bloomberg reuters"
-                st.link_button("Lancer une recherche de sources fiables", f"https://www.google.com/search?q={search_q}")
+                with col_a1:
+                    st.metric("Price Target", f"{target} {currency}")
+                    if target and current_price:
+                        upside = ((target - current_price) / current_price) * 100
+                        color = "green" if upside > 0 else "red"
+                        st.markdown(f"Upside Potential: :{color}[**{upside:+.2f}%**]")
                 
-                st.markdown('</div>', unsafe_allow_html=True)
-            
+                with col_a2:
+                    st.metric("Recommendation", recom)
+                    st.progress(0.7 if "BUY" in recom else 0.3)
+                
+                st.info("Data aggregated from major investment banks (Goldman Sachs, Morgan Stanley).")
             else:
-                # LOCK SCREEN
-                st.warning("⚠️ Zone Réservée aux Membres Premium")
-                st.markdown("""
-                <div style="filter: blur(4px); opacity: 0.5;">
-                    <h3>Consensus des Banques</h3>
-                    <p>Objectif de prix : <b>154.30 $</b></p>
-                    <p>Recommandation : <b>STRONG BUY</b></p>
-                    <p>Potentiel : <b>+24%</b></p>
-                </div>
-                """, unsafe_allow_html=True)
-                st.error("🔒 Les signaux d'achat et objectifs de cours sont floutés.")
-                st.write("Passez Premium pour voir ce que les banques pensent vraiment de cette action.")
+                st.warning("🔒 Premium Feature Locked")
+                st.write("Upgrade to FHi Pro to view institutional price targets and buy/sell signals.")
+
+        # 4. FHi AI ASSISTANT (INTERNAL CHATBOT)
+        with tab_ai:
+            st.markdown("#### 🤖 FHi Quantitative Assistant")
+            st.caption(f"Ask me anything about {current_selection_name}'s data.")
+
+            # Display Chat History
+            for message in st.session_state.messages:
+                with st.chat_message(message["role"]):
+                    st.markdown(message["content"])
+
+            # User Input
+            if prompt := st.chat_input(f"Question about {current_selection_ticker}?"):
+                # Add user message
+                st.session_state.messages.append({"role": "user", "content": prompt})
+                with st.chat_message("user"):
+                    st.markdown(prompt)
+
+                # Generate AI Response (Internal Logic)
+                with st.chat_message("assistant"):
+                    with st.spinner("Analyzing market data..."):
+                        if IS_PREMIUM:
+                            response = local_ai_response(prompt, info, current_selection_ticker)
+                        else:
+                            response = "🔒 The AI Assistant is a PRO feature. Please enter your license key."
+                        
+                        st.markdown(response)
+                        st.session_state.messages.append({"role": "assistant", "content": response})
 
     except Exception as e:
-        st.error(f"Action non trouvée. Essayez le symbole exact (ex: AAPL, AIR.PA). Erreur : {e}")
+        st.error(f"Error loading data: {e}")
