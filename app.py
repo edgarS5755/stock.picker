@@ -3,30 +3,39 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
-from datetime import datetime
 
 # --- CONFIGURATION DU SITE ---
-st.set_page_config(page_title="FHi - Terminal", layout="wide", page_icon="📈")
+st.set_page_config(page_title="FHi - Smart Stock Picker", layout="wide", page_icon="📈")
 
-# --- CSS AVANCÉ (Navigation & Lisibilité) ---
+# --- CSS AVANCÉ ---
 st.markdown("""
 <style>
-    /* Correction de la lisibilité des ONGLETS (Tabs) */
+    /* Navigation */
     button[data-baseweb="tab"] {
-        background-color: #f0f2f6 !important;
-        color: #31333F !important; /* Texte Noir */
+        background-color: #ffffff !important;
+        color: #31333F !important;
         font-weight: 600 !important;
+        border: 1px solid #e0e0e0 !important;
         border-radius: 5px !important;
         margin-right: 5px !important;
     }
     button[data-baseweb="tab"][aria-selected="true"] {
-        background-color: #0068c9 !important; /* Bleu FHi */
+        background-color: #000000 !important; /* Noir FHi */
         color: white !important;
+        border: 1px solid #000000 !important;
     }
     
-    /* Style des cartes et boutons */
-    .metric-card {background-color: #f0f2f6; border-radius: 10px; padding: 15px; text-align: center;}
-    .stButton>button {width: 100%; border-radius: 5px;}
+    /* Zone Premium Grise */
+    .premium-box {
+        background-color: #e9ecef; /* Gris */
+        padding: 20px;
+        border-radius: 10px;
+        border-left: 5px solid #000000;
+        color: #333;
+    }
+    
+    /* Boutons de sélection d'actifs */
+    .stButton>button {width: 100%; border-radius: 5px; border: 1px solid #ddd;}
     
     /* Logo Sidebar */
     [data-testid="stSidebar"] img {
@@ -39,47 +48,43 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- DONNÉES ET CATÉGORIES ---
-# On structure les données pour la navigation verticale
+# --- DONNÉES ET CATÉGORIES (SELECTION ÉLARGIE) ---
 MARKET_DATA = {
-    "🌍 Indices Mondiaux": {
+    "🚀 Pépites US (Growth)": {
+        "Palantir (AI)": "PLTR", "SoFi Technologies": "SOFI", "Unity Software": "U", 
+        "DraftKings": "DKNG", "UiPath (Auto)": "PATH", "Coinbase": "COIN",
+        "Rocket Lab (Espace)": "RKLB", "Crispr (Genomics)": "CRSP"
+    },
+    "🇪🇺 Europe Croissance": {
+        "Dassault Systèmes": "DSY.PA", "Schneider Electric": "SU.PA", "Adyen (Paiement)": "ADYEN.AS", 
+        "ASML (Semiconducteurs)": "ASML.AS", "Ferrari": "RACE.MI", "Airbus": "AIR.PA",
+        "Thales": "HO.PA", "Capgemini": "CAP.PA"
+    },
+    "💉 BioTech & Pharma (Risqué)": {
+        "Moderna": "MRNA", "BioNTech": "BNTX", "Valneva": "VLA.PA", 
+        "Sartorius": "DIM.PA", "Eurofins": "ERF.PA"
+    },
+    "🏢 Blue Chips (Sécurité)": {
+        "Apple": "AAPL", "Microsoft": "MSFT", "Berkshire Hathaway": "BRK-B", 
+        "LVMH": "MC.PA", "TotalEnergies": "TTE.PA", "Air Liquide": "AI.PA"
+    },
+    "🌍 Indices & ETFs": {
         "S&P 500": "^GSPC", "Nasdaq 100": "^IXIC", "CAC 40": "^FCHI", 
-        "DAX (Allemagne)": "^GDAXI", "Nikkei 225 (Japon)": "^N225", "VIX (Peur)": "^VIX"
-    },
-    "🏢 Grandes Actions": {
-        "Apple": "AAPL", "Microsoft": "MSFT", "NVIDIA": "NVDA", "Tesla": "TSLA",
-        "LVMH": "MC.PA", "TotalEnergies": "TTE.PA", "Airbus": "AIR.PA", "Sanofi": "SAN.PA"
-    },
-    "₿ Cryptomonnaies": {
-        "Bitcoin USD": "BTC-USD", "Ethereum USD": "ETH-USD", "Solana": "SOL-USD", 
-        "XRP": "XRP-USD", "Binance Coin": "BNB-USD"
-    },
-    "💱 Forex (Devises)": {
-        "Euro / Dollar": "EURUSD=X", "Dollar / Yen": "JPY=X", "Livres / Dollar": "GBPUSD=X",
-        "Euro / Suisse": "EURCHF=X"
-    },
-    "🛢️ Matières Premières": {
-        "Or (Gold)": "GC=F", "Pétrole (WTI)": "CL=F", "Argent (Silver)": "SI=F", 
-        "Gaz Naturel": "NG=F", "Cuivre": "HG=F"
-    },
-    "📊 ETFs Populaires": {
-        "S&P 500 ETF (VOO)": "VOO", "Nasdaq ETF (QQQ)": "QQQ", 
-        "World ETF (VT)": "VT", "Gold ETF (GLD)": "GLD"
+        "ETF World (CW8)": "CW8.PA", "ETF Emerging": "PAEEM.PA"
     }
 }
 
-# --- GESTION DE L'ÉTAT (POUR LA NAVIGATION FLUIDE) ---
+# --- GESTION DE L'ÉTAT ---
 if 'selected_ticker' not in st.session_state:
-    st.session_state.selected_ticker = "AAPL" # Par défaut
+    st.session_state.selected_ticker = "PLTR" 
 if 'selected_name' not in st.session_state:
-    st.session_state.selected_name = "Apple"
+    st.session_state.selected_name = "Palantir"
 
 def set_ticker(name, ticker):
-    """Fonction déclenchée au clic sur un actif"""
     st.session_state.selected_ticker = ticker
     st.session_state.selected_name = name
 
-# --- FONCTIONS CACHÉES (PERFORMANCE) ---
+# --- FONCTIONS ---
 @st.cache_data(ttl=3600)
 def get_data(ticker):
     stock = yf.Ticker(ticker)
@@ -87,52 +92,61 @@ def get_data(ticker):
     hist = stock.history(period="1y")
     return info, hist
 
-@st.cache_data(ttl=3600)
-def get_news(ticker):
-    stock = yf.Ticker(ticker)
-    return stock.news[:4]
+def generate_ai_prompt(risk, horizon, capital):
+    """Génère un prompt intelligent"""
+    return f"""Agis comme un analyste financier expert (type Warren Buffett croisé avec un Capital Risqueur).
+Mon profil : Investisseur avec un risque '{risk}', pour un horizon de '{horizon}', capital de départ '{capital}'.
+Analyse l'action [INSÉRER NOM ACTION ICI] en te basant sur ses derniers chiffres.
+1. Cette entreprise a-t-elle un avantage concurrentiel durable (Moat) ?
+2. Quels sont les 3 risques majeurs qui pourraient faire chuter le cours de 50% ?
+3. Estime si le prix actuel est une opportunité ou une bulle.
+Réponds avec un ton direct, sans jargon inutile."""
 
-# --- SIDEBAR (NAVIGATION VERTICALE) ---
+# --- SIDEBAR ---
 with st.sidebar:
     try:
         st.image("image_2.png", width=140)
     except:
         st.header("FHi")
     
-    st.markdown("### 🧭 Navigation Marchés")
-    
-    # Menu principal
-    category = st.radio("Classe d'actifs", list(MARKET_DATA.keys()))
+    st.markdown("### 🧭 Explorateur")
+    category = st.radio("Sélection FHi", list(MARKET_DATA.keys()))
     
     st.markdown("---")
-    st.markdown("### 🔐 Compte Pro")
-    pwd = st.text_input("Code Licence", type="password")
+    st.markdown("### 🛠 Recherche Manuelle")
+    st.caption("Cherchez n'importe quelle action (US ou EU)")
+    manual_search = st.text_input("Symbole (ex: TSLA, OR.PA)", "")
+    if st.button("Chercher"):
+        if manual_search:
+            set_ticker(manual_search.upper(), manual_search.upper())
+
+    st.markdown("---")
+    st.markdown("### 🔐 FHi Premium")
+    pwd = st.text_input("Clé d'activation", type="password")
     IS_PREMIUM = pwd == "PRO2026"
     
     if IS_PREMIUM:
-        st.success("Mode TRADER Actif")
+        st.success("Licence ACTIVE")
     else:
         st.info("🔒 Mode Standard")
-        st.caption("Entrez le code pour voir les objectifs de prix des banques.")
+        st.caption("Débloquez le consensus bancaire.")
 
 # --- PAGE PRINCIPALE ---
 
-# 1. ZONE DE SÉLECTION RAPIDE (DASHBOARD CATEGORIE)
+# 1. TABLEAU DE BORD DE SÉLECTION
 st.title(f"Marché : {category}")
 
-# Affichage des actifs de la catégorie choisie sous forme de grille
 cols = st.columns(4)
 assets_list = list(MARKET_DATA[category].items())
 
 for i, (name, ticker_sym) in enumerate(assets_list):
-    # On distribue les boutons dans les colonnes
     col = cols[i % 4]
     if col.button(f"🔎 {name}", key=f"btn_{ticker_sym}"):
         set_ticker(name, ticker_sym)
 
 st.markdown("---")
 
-# 2. ZONE DE DÉTAIL (L'ACTIF SÉLECTIONNÉ)
+# 2. ZONE D'ANALYSE
 current_ticker = st.session_state.selected_ticker
 current_name = st.session_state.selected_name
 
@@ -142,99 +156,106 @@ if current_ticker:
         curr_price = info.get('currentPrice', info.get('regularMarketPreviousClose', 0))
         currency = info.get('currency', 'USD')
         
-        # En-tête du produit
-        h1, h2 = st.columns([3, 1])
-        with h1:
+        # En-tête
+        col_h1, col_h2 = st.columns([3, 1])
+        with col_h1:
             st.header(f"{current_name} ({current_ticker})")
-            st.caption(f"Secteur: {info.get('sector', 'N/A')} | Pays: {info.get('country', 'N/A')}")
-        with h2:
-            st.metric("Prix Actuel", f"{curr_price} {currency}")
+            st.caption(f"Secteur: {info.get('sector', 'N/A')} | Industrie: {info.get('industry', 'N/A')}")
+        with col_h2:
+            st.metric("Prix", f"{curr_price} {currency}")
 
-        # --- LES ONGLETS PRINCIPAUX ---
-        tab_view, tab_financials, tab_pro = st.tabs(["📈 Graphique & Vue", "💰 Données Financières", "🏦 Consensus Banques (PRO)"])
+        # ONGLETS
+        tab_ia, tab_view, tab_financials, tab_pro = st.tabs(["🤖 Assistant IA", "📈 Graphique", "💰 Données (Gratuit)", "🏦 Banques (PREMIUM)"])
 
-        # ONGLET 1 : GRAPHIQUE
+        # --- ONGLET 1 : ASSISTANT IA (NOUVEAU) ---
+        with tab_ia:
+            st.subheader("Assistant de Stratégie FHi")
+            col_ia1, col_ia2 = st.columns([1, 2])
+            
+            with col_ia1:
+                st.write("Profil de l'investisseur :")
+                risk_level = st.select_slider("Votre tolérance au risque", options=["Faible (Bon père de famille)", "Moyen (Équilibré)", "Élevé (Aggressif/Crypto)"])
+                horizon = st.selectbox("Horizon de placement", ["Court terme (Semaines)", "Moyen terme (1-3 ans)", "Long terme (Retraite)"])
+                capital = st.selectbox("Capital", ["< 1 000€", "1 000€ - 10 000€", "> 10 000€"])
+                
+                if st.button("Générer ma stratégie"):
+                    st.success("Profil analysé.")
+            
+            with col_ia2:
+                st.info(f"💡 **Conseil FHi pour le profil {risk_level} :**")
+                
+                if "Élevé" in risk_level:
+                    st.write("Vous cherchez de la performance. Concentrez-vous sur les 'Pépites US' et la 'BioTech'. Acceptez une volatilité de -30%.")
+                elif "Moyen" in risk_level:
+                    st.write("Visez la croissance stable. Le secteur 'Europe Croissance' ou les GAFAM ('Blue Chips') sont idéaux.")
+                else:
+                    st.write("Priorité sécurité. Regardez les ETFs et les actions à dividendes (TotalEnergies, Air Liquide).")
+                
+                st.markdown("### 🧠 Votre Super-Prompt")
+                st.write("Copiez ce texte et collez-le dans ChatGPT/Claude pour une analyse sur-mesure de cette action :")
+                prompt_text = generate_ai_prompt(risk_level, horizon, capital)
+                st.code(prompt_text.replace("[INSÉRER NOM ACTION ICI]", current_ticker), language="text")
+
+        # --- ONGLET 2 : GRAPHIQUE ---
         with tab_view:
-            # Graphique interactif
             fig = go.Figure(data=[go.Candlestick(x=hist.index,
                             open=hist['Open'], high=hist['High'],
                             low=hist['Low'], close=hist['Close'])])
             fig.update_layout(height=500, xaxis_rangeslider_visible=False, margin=dict(l=0, r=0, t=20, b=0))
             st.plotly_chart(fig, use_container_width=True)
-            
-            # Mini Stats
-            c1, c2, c3 = st.columns(3)
-            c1.info(f"Plus Haut (52s): {info.get('fiftyTwoWeekHigh', 'N/A')}")
-            c2.info(f"Plus Bas (52s): {info.get('fiftyTwoWeekLow', 'N/A')}")
-            c3.info(f"Volume Moyen: {info.get('averageVolume', 0)/1e6:.1f} M")
 
-        # ONGLET 2 : FINANCIER
+        # --- ONGLET 3 : FINANCIER (DÉBLOQUÉ) ---
         with tab_financials:
-            col_f1, col_f2 = st.columns(2)
-            with col_f1:
-                st.subheader("Bilan")
-                st.write(f"**Capitalisation :** {info.get('marketCap', 0)/1e9:.2f} Mrd {currency}")
-                st.write(f"**Revenus (TTM) :** {info.get('totalRevenue', 0)/1e9:.2f} Mrd {currency}")
-                st.write(f"**Bénéfice (Profit) :** {info.get('grossProfits', 0)/1e9:.2f} Mrd {currency}")
-            with col_f2:
-                st.subheader("Ratios")
-                st.write(f"**PER (Price/Earnings) :** {info.get('trailingPE', 'N/A')}")
-                st.write(f"**P/B (Price/Book) :** {info.get('priceToBook', 'N/A')}")
-                st.write(f"**Dividende :** {info.get('dividendYield', 0)*100:.2f}%")
-
-        # ONGLET 3 : PRO / BANQUES
-        with tab_pro:
-            st.subheader("🕵️‍♂️ Analyse des Institutionnels")
+            st.write("Données fondamentales accessibles à tous les membres.")
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Capitalisation", f"{info.get('marketCap', 0)/1e9:.1f} Mrd")
+            c2.metric("Revenus (TTM)", f"{info.get('totalRevenue', 0)/1e9:.1f} Mrd")
+            c3.metric("Marge Bénéficiaire", f"{info.get('profitMargins', 0)*100:.1f}%")
+            c4.metric("Dette/Equity", f"{info.get('debtToEquity', 'N/A')}")
             
+            st.markdown("#### Description")
+            st.write(info.get('longBusinessSummary', 'Pas de description.'))
+
+        # --- ONGLET 4 : PRO / BANQUES (PREMIUM GRIS) ---
+        with tab_pro:
             if IS_PREMIUM:
-                # Récupération données analystes
+                # CONTENU PAYANT EN GRIS
+                st.markdown('<div class="premium-box">', unsafe_allow_html=True)
+                
+                st.subheader("🔒 Consensus des Banques & Analystes")
+                
                 target = info.get('targetMeanPrice')
                 recommendation = info.get('recommendationKey', 'inconnu').upper().replace("_", " ")
-                num_analysts = info.get('numberOfAnalystOpinions', 0)
                 
-                # Jauge de Consensus
-                c_pro1, c_pro2 = st.columns(2)
-                with c_pro1:
-                    st.metric("Objectif de Prix Moyen (Consensus)", f"{target} {currency}")
+                col_p1, col_p2 = st.columns(2)
+                with col_p1:
+                    st.metric("🎯 Objectif de Prix Moyen", f"{target} {currency}")
                     if target and curr_price:
-                        upside = ((target - curr_price) / curr_price) * 100
-                        color = "green" if upside > 0 else "red"
-                        st.markdown(f"Potentiel : :{color}[**{upside:+.2f}%**]")
-                    
-                with c_pro2:
-                    st.metric("Recommandation", recommendation)
-                    st.caption(f"Basé sur {num_analysts} analystes professionnels.")
+                        pot = ((target - curr_price) / curr_price) * 100
+                        st.write(f"Potentiel : **{pot:+.1f}%**")
+                with col_p2:
+                    st.metric("📢 Avis Majoritaire", recommendation)
 
                 st.markdown("---")
-                st.markdown("#### 🔗 Sources & Rapports Externes")
-                st.write("Les données ci-dessus sont agrégées (Moyenne des notes Goldman Sachs, JP Morgan, Morgan Stanley...).")
+                st.markdown("**🔍 Vérification des sources :**")
+                search_q = f"{current_name} stock analyst ratings bloomberg reuters"
+                st.link_button("Lancer une recherche de sources fiables", f"https://www.google.com/search?q={search_q}")
                 
-                # Liens dynamiques pour la fiabilité
-                col_link1, col_link2 = st.columns(2)
-                with col_link1:
-                    # Lien vers Google News recherche spécifique
-                    search_query = f"{current_name} stock analyst rating"
-                    st.link_button("📰 Lire les articles récents (Presse)", f"https://www.google.com/search?q={search_query}&tbm=nws")
-                with col_link2:
-                    # Lien vers Yahoo Analysis
-                    st.link_button("📊 Détails Consensus (Yahoo Finance)", f"https://finance.yahoo.com/quote/{current_ticker}/analysis")
-
+                st.markdown('</div>', unsafe_allow_html=True)
+            
             else:
-                st.error("🔒 Section Réservée aux membres FHi PRO")
-                st.write("Accédez aux objectifs de prix des banques et aux liens vers les rapports d'analystes.")
-
-        # --- ACTUALITÉS EN BAS DE PAGE ---
-        st.markdown("---")
-        st.subheader(f"Dernières Infos : {current_name}")
-        news = get_news(current_ticker)
-        if news:
-            for n in news:
-                title = n.get('title')
-                link = n.get('link')
-                publisher = n.get('publisher')
-                st.markdown(f"- **[{title}]({link})** _(Source: {publisher})_")
-        else:
-            st.caption("Pas d'actualités récentes disponibles.")
+                # LOCK SCREEN
+                st.warning("⚠️ Zone Réservée aux Membres Premium")
+                st.markdown("""
+                <div style="filter: blur(4px); opacity: 0.5;">
+                    <h3>Consensus des Banques</h3>
+                    <p>Objectif de prix : <b>154.30 $</b></p>
+                    <p>Recommandation : <b>STRONG BUY</b></p>
+                    <p>Potentiel : <b>+24%</b></p>
+                </div>
+                """, unsafe_allow_html=True)
+                st.error("🔒 Les signaux d'achat et objectifs de cours sont floutés.")
+                st.write("Passez Premium pour voir ce que les banques pensent vraiment de cette action.")
 
     except Exception as e:
-        st.error(f"Erreur de chargement pour {current_ticker}. Essayez un autre actif. ({e})")
+        st.error(f"Action non trouvée. Essayez le symbole exact (ex: AAPL, AIR.PA). Erreur : {e}")
