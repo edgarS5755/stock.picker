@@ -4,310 +4,248 @@ import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime
 
-# --- 1. CONFIGURATION & CSS (LOOK "PRO DARK") ---
-st.set_page_config(page_title="FHi - Financial Health Index", layout="wide", page_icon="📈")
+# --- 1. CONFIGURATION DU SITE ---
+st.set_page_config(page_title="FHi", layout="wide", page_icon=None, initial_sidebar_state="collapsed")
 
+# --- 2. CSS "SAFARI DARK" (Design Apple-like) ---
 st.markdown("""
 <style>
-    /* FOND GLOBAL & TYPO */
-    .stApp { background-color: #000000; color: #e0e0e0; font-family: 'Segoe UI', sans-serif; }
+    /* RESET GLOBAL */
+    .stApp { background-color: #000000; color: #f5f5f7; font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
     
-    /* BANDEAU DEFILANT (TICKER TAPE CSS) */
-    .ticker-wrap {
-        width: 100%; overflow: hidden; background-color: #111; border-bottom: 1px solid #333; padding: 10px 0; white-space: nowrap;
+    /* CACHER LA SIDEBAR ET LE HEADER STREAMLIT */
+    [data-testid="stSidebar"] { display: none; }
+    header { visibility: hidden; }
+    
+    /* BARRE DE NAVIGATION (STYLE SAFARI) */
+    .nav-container {
+        position: fixed; top: 0; left: 0; width: 100%; height: 60px;
+        background-color: rgba(28, 28, 30, 0.8); /* Transparence floutée */
+        backdrop-filter: blur(20px);
+        z-index: 999; border-bottom: 1px solid #333;
+        display: flex; align-items: center; justify-content: space-between; padding: 0 20px;
     }
-    .ticker { display: inline-block; animation: marquee 30s linear infinite; }
-    @keyframes marquee { 0% { transform: translateX(100%); } 100% { transform: translateX(-100%); } }
-    .ticker-item {
-        display: inline-block; padding: 0 2rem; font-size: 1rem; color: #fff; font-weight: bold;
+    
+    /* INPUT RECHERCHE (STYLE URL BAR) */
+    .stTextInput > div > div > input {
+        background-color: #1c1c1e; color: #fff; border: none; border-radius: 8px; text-align: center;
+        font-size: 14px; height: 35px;
     }
-    .up { color: #00e676; }
-    .down { color: #ff1744; }
+    .stTextInput > div > div > input:focus { box-shadow: 0 0 0 2px #0a84ff; }
 
-    /* CARTE NEWS (STYLE INVESTING.COM) */
-    .news-container {
-        background-color: #161b22; border: 1px solid #333; border-radius: 8px; margin-bottom: 15px; overflow: hidden;
-        transition: transform 0.2s;
+    /* BOUTONS NAVIGATION (ONGLETS PROPRES) */
+    div.stButton > button {
+        background-color: transparent; border: none; color: #86868b; font-weight: 500; font-size: 15px;
+        transition: color 0.2s; padding: 0 15px;
     }
-    .news-container:hover { border-color: #2962ff; transform: translateY(-2px); }
-    .news-img { width: 100%; height: 160px; object-fit: cover; opacity: 0.9; }
-    .news-body { padding: 12px; }
-    .news-title { font-size: 1.05rem; font-weight: 600; color: #fff; text-decoration: none; display: block; margin-bottom: 5px; line-height: 1.4; }
-    .news-meta { font-size: 0.8rem; color: #888; }
+    div.stButton > button:hover { color: #ffffff; }
+    div.stButton > button:focus { color: #ffffff; border: none; box-shadow: none; }
+    
+    /* CARTES FLOTTANTES (SANS BORDURES) */
+    .stock-card {
+        background-color: #1c1c1e; padding: 15px; border-radius: 12px; margin-bottom: 10px;
+        cursor: pointer; transition: transform 0.1s, background-color 0.2s;
+    }
+    .stock-card:hover { background-color: #2c2c2e; }
+    
+    /* TYPOGRAPHIE */
+    h1, h2, h3 { font-weight: 600; letter-spacing: -0.5px; color: #fff; }
+    .sub-text { color: #86868b; font-size: 13px; }
+    .price-text { font-size: 16px; font-weight: 600; color: #fff; }
+    .green { color: #30d158; }
+    .red { color: #ff453a; }
 
-    /* ONGLETS NAVIGATION */
-    .stTabs [data-baseweb="tab-list"] { gap: 10px; border-bottom: 1px solid #333; }
-    .stTabs [data-baseweb="tab"] { background-color: #111; border: 1px solid #333; color: #888; border-radius: 6px 6px 0 0; }
-    .stTabs [aria-selected="true"] { background-color: #2962ff !important; color: white !important; border-bottom: none; }
-
-    /* INPUT RECHERCHE (LOUPE) */
-    .stTextInput input { background-color: #222; color: white; border: 1px solid #444; border-radius: 20px; }
-
-    /* SIDEBAR */
-    [data-testid="stSidebar"] { background-color: #050505; border-right: 1px solid #222; }
+    /* ONGLETS INTERNES (Minimalistes) */
+    .stTabs [data-baseweb="tab-list"] { border-bottom: 1px solid #333; gap: 20px; }
+    .stTabs [data-baseweb="tab"] { background-color: transparent; border: none; color: #86868b; font-size: 14px; }
+    .stTabs [aria-selected="true"] { color: #fff !important; font-weight: 600; border-bottom: 2px solid #fff; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- 2. DONNÉES & MAPPING ---
-# Base de reconnaissance étendue pour la loupe
+# --- 3. GESTION DE L'ÉTAT (NAVIGATION) ---
+if 'view' not in st.session_state: st.session_state.view = 'accueil'
+if 'ticker' not in st.session_state: st.session_state.ticker = None
+
+def go_to_terminal(symbol):
+    st.session_state.ticker = symbol
+    st.session_state.view = 'terminal'
+
+def go_home():
+    st.session_state.view = 'accueil'
+
+# --- 4. DONNÉES ---
+SECTORS = {
+    "US Tech": ["AAPL", "NVDA", "MSFT", "PLTR", "TSLA"],
+    "Europe Luxe & Ind": ["MC.PA", "RMS.PA", "AIR.PA", "TTE.PA"],
+    "Crypto Assets": ["BTC-USD", "ETH-USD", "SOL-USD", "COIN"],
+    "Pharma": ["LLY", "NVO", "SANOFI"]
+}
+
 TICKER_MAP = {
-    "LVMH": "MC.PA", "TOTAL": "TTE.PA", "AIRBUS": "AIR.PA", "SANOFI": "SAN.PA", "BNP": "BNP.PA", "AXA": "CS.PA",
-    "APPLE": "AAPL", "MICROSOFT": "MSFT", "TESLA": "TSLA", "NVIDIA": "NVDA", "AMAZON": "AMZN", "GOOGLE": "GOOGL",
-    "BITCOIN": "BTC-USD", "ETHEREUM": "ETH-USD", "SOLANA": "SOL-USD",
-    "OR": "GC=F", "PETROLE": "CL=F"
+    "LVMH": "MC.PA", "APPLE": "AAPL", "TESLA": "TSLA", "BITCOIN": "BTC-USD"
 }
-
-SECTORS_DATA = {
-    "🔥 Pépites Croissance": ["PLTR", "SOFI", "NVDA", "AMD", "TSLA", "SNOW", "U"],
-    "💎 Luxe & Europe": ["MC.PA", "RMS.PA", "OR.PA", "KER.PA", "RACE.MI", "AIR.PA"],
-    "⚡ Énergie & Industrie": ["TTE.PA", "XOM", "SHELL", "SU.PA", "ENPH"],
-    "₿ Crypto & Blockchain": ["BTC-USD", "ETH-USD", "COIN", "MSTR", "SOL-USD"],
-    "💊 BioTech & Pharma": ["LLY", "NVO", "MRNA", "PFE", "SANOFI"]
-}
-
-INDICES_TICKER = {"S&P500": "^GSPC", "CAC40": "^FCHI", "NASDAQ": "^IXIC", "BTC": "BTC-USD", "VIX": "^VIX"}
-
-# --- 3. FONCTIONS INTELLIGENTES (CACHE) ---
-
-def safe_fmt(val, fmt="{:.2f}", fallback="-"):
-    if val is None or val == "None": return fallback
-    try: return fmt.format(val)
-    except: return fallback
 
 @st.cache_data(ttl=600)
-def get_ticker_tape_data():
-    """Récupère les données légères pour le bandeau"""
-    html_parts = []
-    for name, sym in INDICES_TICKER.items():
-        try:
-            t = yf.Ticker(sym)
-            hist = t.history(period="2d")
-            if len(hist) > 1:
-                close = hist['Close'].iloc[-1]
-                prev = hist['Close'].iloc[-2]
-                chg = ((close - prev)/prev)*100
-                cls = "up" if chg >= 0 else "down"
-                sign = "+" if chg >= 0 else ""
-                html_parts.append(f'<span class="ticker-item">{name} <span class="{cls}">{sign}{chg:.2f}%</span></span>')
-        except: pass
-    return "".join(html_parts) * 5  # Répéter pour l'effet de boucle
+def get_simple_quote(symbol):
+    try:
+        t = yf.Ticker(symbol)
+        # Fast info est plus rapide
+        price = t.fast_info.last_price
+        prev = t.fast_info.previous_close
+        change = ((price - prev)/prev)*100
+        return price, change
+    except: return 0, 0
 
 @st.cache_data(ttl=1800)
-def get_stock_full(symbol):
+def get_full_data(symbol):
     try:
         t = yf.Ticker(symbol)
         return t.info, t.history(period="1y"), t.news
     except: return None, None, None
 
-def ai_bot_logic(query, info, symbol):
-    """Logique du Bot FHi sans API externe"""
-    q = query.lower()
-    name = info.get('shortName', symbol)
+# --- 5. BARRE DE NAVIGATION (TOP BAR) ---
+# On utilise des colonnes pour simuler la barre Safari
+col_logo, col_search, col_nav1, col_nav2 = st.columns([1, 4, 1, 1])
+
+with col_logo:
+    if st.button("FHi", key="nav_home"):
+        go_home()
+        st.rerun()
+
+with col_search:
+    search_val = st.text_input("Recherche (ex: LVMH)", label_visibility="collapsed", placeholder="Rechercher ou saisir un site").upper()
+    if search_val:
+        # Check map
+        target = search_val
+        for k, v in TICKER_MAP.items():
+            if k in search_val: target = v
+        go_to_terminal(target)
+        st.rerun()
+
+with col_nav1:
+    if st.button("Marchés"): 
+        go_home()
+        st.rerun()
+
+with col_nav2:
+    if st.button("Terminal"):
+        if st.session_state.ticker: st.session_state.view = 'terminal'
+        st.rerun()
+
+st.write("") # Spacer pour ne pas être collé à la barre
+
+# --- 6. VUE : ACCUEIL ---
+if st.session_state.view == 'accueil':
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.title("Marchés")
     
-    # Concurrents basiques par secteur (Logique hardcodée pour vitesse)
-    sector = info.get('sector', '')
-    peers = "ses concurrents"
-    if "Technology" in sector: peers = "Microsoft, Apple ou Nvidia"
-    if "Auto" in sector: peers = "Toyota, VW ou Ford"
-    if "Luxury" in sector: peers = "Hermès ou Kering"
-
-    if any(x in q for x in ["histoire", "activite", "fait quoi"]):
-        return f"**À propos de {name} :**\n\n{info.get('longBusinessSummary', 'Pas de description.')[:600]}..."
+    # BANDEAU D'INDICES (Minimaliste)
+    cols = st.columns(4)
+    indices = {"S&P 500": "^GSPC", "CAC 40": "^FCHI", "BTC": "BTC-USD", "EUR/USD": "EURUSD=X"}
     
-    if any(x in q for x in ["avis", "acheter", "vendre", "potentiel"]):
-        tgt = info.get('targetMeanPrice')
-        px = info.get('currentPrice')
-        rec = info.get('recommendationKey', 'inconnue').upper().replace('_', ' ')
-        if tgt and px:
-            pot = ((tgt - px)/px)*100
-            return f"**Analyse FHi :**\n\nLe consensus analystes est **{rec}**.\nObjectif de cours : {tgt} (Potentiel: {pot:+.2f}%).\nMon conseil : {'Surveiller pour achat' if pot > 10 else 'Attendre un repli'}."
-        return "Données analystes insuffisantes pour un conseil ferme."
-
-    if any(x in q for x in ["concurrent", "rival", "comparaison"]):
-        pe = info.get('trailingPE', 'N/A')
-        return f"{name} évolue dans le secteur {sector}. On la compare souvent à **{peers}**. Son PER actuel est de {pe}, ce qui permet de juger sa cherté relative."
-
-    return f"Je suis l'IA experte sur {name}. Demandez-moi son histoire, ses concurrents ou mon avis d'investissement."
-
-# --- 4. INTERFACE : SIDEBAR ---
-with st.sidebar:
-    try:
-        st.image("image_2.png", width=140)
-    except:
-        st.header("FHi")
-
-    st.markdown("### 🔍 Recherche Rapide")
-    # La Loupe qui contrôle tout
-    search_query = st.text_input("Symbole ou Nom (ex: LVMH)", placeholder="Chercher une action...").upper()
+    for i, (name, sym) in enumerate(indices.items()):
+        p, c = get_simple_quote(sym)
+        color = "green" if c >= 0 else "red"
+        cols[i].markdown(f"""
+        <div style="text-align:center;">
+            <div class="sub-text">{name}</div>
+            <div class="price-text">{p:,.2f} <span class="{color}">{c:+.2f}%</span></div>
+        </div>
+        """, unsafe_allow_html=True)
     
     st.markdown("---")
-    st.markdown("### 🧭 Menu")
-    nav = st.radio("Navigation", ["🏠 Accueil & News", "📊 Terminal Pro"], label_visibility="collapsed")
-    
+
+    # GRILLE SECTORIELLE INTERACTIVE
+    for cat, tickers in SECTORS.items():
+        st.subheader(cat)
+        
+        # On crée une ligne de colonnes
+        cols_stock = st.columns(len(tickers))
+        
+        for idx, t in enumerate(tickers):
+            # Récupération data rapide
+            p, c = get_simple_quote(t)
+            c_color = "green" if c >= 0 else "red"
+            
+            # Le bouton Streamlit prend toute la largeur de la colonne
+            # L'astuce : utiliser le bouton comme carte cliquable
+            label = f"{t}\n{p:.2f} ({c:+.1f}%)"
+            if cols_stock[idx].button(label, key=f"btn_{t}"):
+                go_to_terminal(t)
+                st.rerun()
+
     st.markdown("---")
-    st.markdown("### 🔐 Compte Pro")
-    pwd = st.text_input("Clé Licence", type="password")
-    IS_PRO = pwd == "PRO2026"
-    if IS_PRO: st.success("Mode TRADER : ACTIF")
+    st.subheader("Actualités")
+    
+    # News S&P500 génériques
+    _, _, news = get_full_data("^GSPC")
+    if news:
+        for n in news[:5]:
+            with st.container():
+                c1, c2 = st.columns([1, 4])
+                with c1:
+                    # Image
+                    img = n.get('thumbnail', {}).get('resolutions', [{}])[0].get('url', '')
+                    if img: st.image(img, use_container_width=True)
+                with c2:
+                    st.markdown(f"**[{n['title']}]({n['link']})**")
+                    st.caption(f"{n['publisher']} • {datetime.fromtimestamp(n['providerPublishTime']).strftime('%H:%M')}")
+            st.divider()
 
-# --- LOGIQUE DE ROUTAGE ---
-# Si une recherche est faite dans la loupe, on force l'affichage du Terminal
-active_ticker = None
-if search_query:
-    nav = "📊 Terminal Pro" # Force switch
-    # Mapping Nom -> Symbole
-    found = False
-    for k, v in TICKER_MAP.items():
-        if k in search_query:
-            active_ticker = v
-            found = True
-            break
-    if not found: active_ticker = search_query
+# --- 7. VUE : TERMINAL (FICHE ACTION) ---
+elif st.session_state.view == 'terminal':
+    st.markdown("<br>", unsafe_allow_html=True)
+    
+    symbol = st.session_state.ticker
+    if not symbol:
+        st.warning("Aucune action sélectionnée.")
+        st.stop()
 
-# --- 5. PAGE : ACCUEIL (MEDIA & PEPITES) ---
-if nav == "🏠 Accueil & News":
-    
-    # A. Ticker Tape (HTML CSS Animation)
-    tape_content = get_ticker_tape_data()
-    st.markdown(f'<div class="ticker-wrap"><div class="ticker">{tape_content}</div></div>', unsafe_allow_html=True)
-    
-    st.title("FHi Market Intelligence")
-    
-    # B. Compartiments Sectoriels (Pépites)
-    st.subheader("🔥 Les Pépites du Marché")
-    tabs_sec = st.tabs(list(SECTORS_DATA.keys()))
-    
-    for i, (sec_name, tickers) in enumerate(SECTORS_DATA.items()):
-        with tabs_sec[i]:
-            # Grille de boutons
-            cols = st.columns(6)
-            for j, t in enumerate(tickers):
-                if cols[j % 6].button(f"{t}", key=f"btn_{t}"):
-                    # Astuce: On stocke dans la session pour basculer vers le terminal
-                    st.session_state['force_ticker'] = t
-                    st.rerun() # Recharge pour appliquer le changement
-
-    # C. Actualités Visuelles (Mise en page Magazine)
-    st.markdown("---")
-    st.subheader("📰 À la Une")
-    
-    # On récupère des news générales (Tech + Finance)
-    _, _, news_items = get_stock_full("^GSPC") # S&P 500 pour news globales
-    
-    if news_items:
-        # Grille 3 colonnes pour les news
-        rows = [news_items[i:i+3] for i in range(0, min(len(news_items), 9), 3)]
-        for row in rows:
-            cols = st.columns(3)
-            for idx, article in enumerate(row):
-                with cols[idx]:
-                    # Gestion Image (Try/Except pour éviter crash)
-                    img_url = "https://via.placeholder.com/300x160?text=FHi+News"
-                    if 'thumbnail' in article and 'resolutions' in article['thumbnail']:
-                        try: img_url = article['thumbnail']['resolutions'][0]['url']
-                        except: pass
-                    
-                    # HTML Card
-                    st.markdown(f"""
-                    <div class="news-container">
-                        <a href="{article['link']}" target="_blank">
-                            <img src="{img_url}" class="news-img">
-                        </a>
-                        <div class="news-body">
-                            <a href="{article['link']}" target="_blank" class="news-title">{article['title']}</a>
-                            <div class="news-meta">{article['publisher']} • {datetime.fromtimestamp(article['providerPublishTime']).strftime('%H:%M')}</div>
-                        </div>
-                    </div>
-                    """, unsafe_allow_html=True)
-
-# --- 6. PAGE : TERMINAL COMPLET ---
-if nav == "📊 Terminal Pro":
-    # Récupération du ticker (soit via Loupe, soit via Clic Accueil)
-    if 'force_ticker' in st.session_state and not search_query:
-        active_ticker = st.session_state['force_ticker']
-    if not active_ticker: active_ticker = "AAPL" # Défaut
-
-    # Chargement Data
-    info, hist, news = get_stock_full(active_ticker)
+    info, hist, news = get_full_data(symbol)
     
     if info:
-        # Header Pro
+        # HEADER ACTION
         c1, c2 = st.columns([3, 1])
         with c1:
-            st.title(f"{info.get('shortName', active_ticker)} ({active_ticker})")
-            st.caption(f"{info.get('sector', 'N/A')} | {info.get('country', 'Monde')}")
+            st.title(info.get('shortName', symbol))
+            st.caption(f"{symbol} • {info.get('sector', '')} • {info.get('country', '')}")
         with c2:
             price = info.get('currentPrice', info.get('regularMarketPreviousClose'))
             curr = info.get('currency', 'USD')
-            st.metric("Cours Actuel", f"{price} {curr}")
+            st.metric("Cours", f"{price} {curr}")
 
-        # Onglets Détails
-        t_chart, t_data, t_pro, t_ai = st.tabs(["📈 Graphique", "💰 Financier", "🏦 Banques (PRO)", "🤖 Assistant FHi"])
+        # ONGLETS SAFARI
+        tab_chart, tab_data, tab_ai = st.tabs(["Graphique", "Données", "Assistant"])
 
-        with t_chart:
-            if hist is not None and not hist.empty:
+        with tab_chart:
+            # Graphique épuré
+            if hist is not None:
                 fig = go.Figure(data=[go.Candlestick(x=hist.index, open=hist['Open'], high=hist['High'], low=hist['Low'], close=hist['Close'])])
-                fig.update_layout(template="plotly_dark", height=500, xaxis_rangeslider_visible=False, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
+                fig.update_layout(
+                    template="plotly_dark", 
+                    height=500, 
+                    xaxis_rangeslider_visible=False, 
+                    paper_bgcolor='rgba(0,0,0,0)', 
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    margin=dict(l=0, r=0, t=20, b=0)
+                )
                 st.plotly_chart(fig, use_container_width=True)
-            else: st.warning("Graphique indisponible.")
 
-        with t_data:
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Cap. Boursière", safe_fmt(info.get('marketCap')/1e9 if info.get('marketCap') else 0, "{:.1f} Mrd"))
-            c2.metric("Chiffre d'Affaires", safe_fmt(info.get('totalRevenue')/1e9 if info.get('totalRevenue') else 0, "{:.1f} Mrd"))
-            c3.metric("PER (Ratio)", safe_fmt(info.get('trailingPE')))
-            c4.metric("Dividende", safe_fmt(info.get('dividendYield'), "{:.2%}"))
-            st.markdown("#### Profil")
+        with tab_data:
+            c1, c2, c3 = st.columns(3)
+            c1.write(f"**Cap Market**\n{info.get('marketCap', 0)/1e9:.1f} Mrd")
+            c2.write(f"**PER**\n{info.get('trailingPE', '-')}")
+            c3.write(f"**Cible Analystes**\n{info.get('targetMeanPrice', '-')}")
+            st.markdown("<br>", unsafe_allow_html=True)
             st.write(info.get('longBusinessSummary', ''))
 
-        with t_pro:
-            if IS_PRO:
-                tgt = info.get('targetMeanPrice')
-                rec = info.get('recommendationKey', 'N/A').upper().replace('_', ' ')
-                
-                col_p1, col_p2 = st.columns(2)
-                with col_p1:
-                    st.metric("Objectif Moyen", safe_fmt(tgt, f"{{}} {curr}"))
-                    if tgt and price:
-                        pot = ((tgt - price)/price)*100
-                        color = "green" if pot > 0 else "red"
-                        st.markdown(f"Potentiel : :{color}[**{pot:+.2f}%**]")
-                with col_p2:
-                    st.metric("Consensus", rec)
-                    st.progress(0.8 if "BUY" in rec else 0.4)
-                
-                st.info("Données agrégées des analystes majeurs (Goldman, JP Morgan...).")
-                c_lk1, c_lk2 = st.columns(2)
-                c_lk1.link_button("Vérifier sur Yahoo Finance", f"https://finance.yahoo.com/quote/{active_ticker}")
-                c_lk2.link_button("Vérifier sur MarketWatch", f"https://www.marketwatch.com/investing/stock/{active_ticker}")
-            else:
-                st.warning("🔒 Section PRO verrouillée. Entrez votre clé licence dans le menu.")
-
-        with t_ai:
-            st.markdown(f"### 🤖 Discussion avec l'Analyste FHi")
-            # Chatbot UI
-            if "messages" not in st.session_state: st.session_state.messages = []
-            
-            # Afficher historique (clean up si on change d'action)
-            if 'last_ticker' not in st.session_state or st.session_state['last_ticker'] != active_ticker:
-                st.session_state.messages = []
-                st.session_state['last_ticker'] = active_ticker
-
-            for msg in st.session_state.messages:
-                st.chat_message(msg["role"]).write(msg["content"])
-
-            if prompt := st.chat_input(f"Posez une question sur {active_ticker}..."):
-                st.chat_message("user").write(prompt)
-                st.session_state.messages.append({"role": "user", "content": prompt})
-                
-                with st.spinner("Analyse en cours..."):
-                    if IS_PRO:
-                        resp = ai_bot_logic(prompt, info, active_ticker)
-                    else:
-                        resp = "🔒 Je ne peux pas analyser les concurrents en version gratuite."
-                    
-                    st.chat_message("assistant").write(resp)
-                    st.session_state.messages.append({"role": "assistant", "content": resp})
+        with tab_ai:
+            st.write(f"**Analyse FHi sur {symbol}**")
+            # Petit bot intégré
+            q = st.text_input("Poser une question...", key="ai_input")
+            if q:
+                rec = info.get('recommendationKey', 'inconnue').upper().replace('_', ' ')
+                st.info(f"Le consensus est {rec}. Basé sur les fondamentaux, {symbol} est une valeur à surveiller.")
 
     else:
-        st.error(f"Impossible de charger '{active_ticker}'. Vérifiez le symbole.")
+        st.error("Données indisponibles.")
