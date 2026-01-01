@@ -5,266 +5,236 @@ import numpy as np
 import plotly.graph_objects as go
 from datetime import datetime
 
-# --- CONFIGURATION DU SITE (Style FHi) ---
-st.set_page_config(page_title="FHi - Financial Health Index", layout="wide", page_icon="📈")
+# --- CONFIGURATION DU SITE ---
+st.set_page_config(page_title="FHi - Terminal", layout="wide", page_icon="📈")
 
-# --- CSS PERSONNALISÉ POUR LE LOOK "TRADER" ET LOGO ---
+# --- CSS AVANCÉ (Navigation & Lisibilité) ---
 st.markdown("""
 <style>
-    /* Style des cartes de métriques */
+    /* Correction de la lisibilité des ONGLETS (Tabs) */
+    button[data-baseweb="tab"] {
+        background-color: #f0f2f6 !important;
+        color: #31333F !important; /* Texte Noir */
+        font-weight: 600 !important;
+        border-radius: 5px !important;
+        margin-right: 5px !important;
+    }
+    button[data-baseweb="tab"][aria-selected="true"] {
+        background-color: #0068c9 !important; /* Bleu FHi */
+        color: white !important;
+    }
+    
+    /* Style des cartes et boutons */
     .metric-card {background-color: #f0f2f6; border-radius: 10px; padding: 15px; text-align: center;}
-    /* Style des onglets */
-    .stTabs [data-baseweb="tab-list"] {gap: 20px;}
-    .stTabs [data-baseweb="tab"] {height: 50px; white-space: pre-wrap; background-color: #ffffff; border-radius: 5px;}
-    .stTabs [aria-selected="true"] {background-color: #e6f3ff; color: #0068c9; font-weight: bold;}
-    /* Style des news */
-    .news-item {padding: 10px; border-bottom: 1px solid #eee;}
-    .news-title {font-weight: bold; color: #0068c9; text-decoration: none;}
-    .news-source {font-size: 0.8em; color: #666;}
-    /* Style du Logo en Sidebar (Fondu et taille) */
+    .stButton>button {width: 100%; border-radius: 5px;}
+    
+    /* Logo Sidebar */
     [data-testid="stSidebar"] img {
-        opacity: 0.8; /* Effet de transparence pour le fondu */
-        margin-bottom: -20px; /* Remonte le logo vers le titre */
+        opacity: 0.9;
+        margin-bottom: 20px;
+        display: block;
+        margin-left: auto;
+        margin-right: auto;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# --- DICTIONNAIRE DE MAPPING (NOM -> TICKER) ---
-POPULAR_STOCKS = {
-    "Apple Inc.": "AAPL", "Microsoft": "MSFT", "NVIDIA": "NVDA", "Amazon": "AMZN", "Google (Alphabet)": "GOOGL",
-    "Tesla": "TSLA", "Meta (Facebook)": "META", "Berkshire Hathaway": "BRK-B", "TSMC": "TSM",
-    "LVMH (Luxe)": "MC.PA", "TotalEnergies": "TTE.PA", "L'Oréal": "OR.PA", "Hermès": "RMS.PA", "Sanofi": "SAN.PA",
-    "Airbus": "AIR.PA", "BNP Paribas": "BNP.PA", "AXA": "CS.PA",
-    "Volkswagen": "VOW3.DE", "Siemens": "SIE.DE", "SAP": "SAP.DE",
-    "Toyota": "TM", "Sony": "SONY", "Samsung Electronics": "005930.KS",
-    "Alibaba": "BABA", "Tencent": "TCEHY"
+# --- DONNÉES ET CATÉGORIES ---
+# On structure les données pour la navigation verticale
+MARKET_DATA = {
+    "🌍 Indices Mondiaux": {
+        "S&P 500": "^GSPC", "Nasdaq 100": "^IXIC", "CAC 40": "^FCHI", 
+        "DAX (Allemagne)": "^GDAXI", "Nikkei 225 (Japon)": "^N225", "VIX (Peur)": "^VIX"
+    },
+    "🏢 Grandes Actions": {
+        "Apple": "AAPL", "Microsoft": "MSFT", "NVIDIA": "NVDA", "Tesla": "TSLA",
+        "LVMH": "MC.PA", "TotalEnergies": "TTE.PA", "Airbus": "AIR.PA", "Sanofi": "SAN.PA"
+    },
+    "₿ Cryptomonnaies": {
+        "Bitcoin USD": "BTC-USD", "Ethereum USD": "ETH-USD", "Solana": "SOL-USD", 
+        "XRP": "XRP-USD", "Binance Coin": "BNB-USD"
+    },
+    "💱 Forex (Devises)": {
+        "Euro / Dollar": "EURUSD=X", "Dollar / Yen": "JPY=X", "Livres / Dollar": "GBPUSD=X",
+        "Euro / Suisse": "EURCHF=X"
+    },
+    "🛢️ Matières Premières": {
+        "Or (Gold)": "GC=F", "Pétrole (WTI)": "CL=F", "Argent (Silver)": "SI=F", 
+        "Gaz Naturel": "NG=F", "Cuivre": "HG=F"
+    },
+    "📊 ETFs Populaires": {
+        "S&P 500 ETF (VOO)": "VOO", "Nasdaq ETF (QQQ)": "QQQ", 
+        "World ETF (VT)": "VT", "Gold ETF (GLD)": "GLD"
+    }
 }
 
-# --- FONCTIONS AVEC MISE EN CACHE (ANTI RATE-LIMIT) ---
+# --- GESTION DE L'ÉTAT (POUR LA NAVIGATION FLUIDE) ---
+if 'selected_ticker' not in st.session_state:
+    st.session_state.selected_ticker = "AAPL" # Par défaut
+if 'selected_name' not in st.session_state:
+    st.session_state.selected_name = "Apple"
 
-# On garde les données principales en mémoire pendant 2 heures (7200 secondes)
-@st.cache_data(ttl=7200, show_spinner=False)
-def get_stock_data_cached(ticker_symbol):
-    """Récupère infos et historique avec cache"""
-    stock = yf.Ticker(ticker_symbol)
-    # On force le téléchargement des données essentielles pour éviter les bugs de yfinance
-    info = stock.fast_info 
-    # On complète avec le 'info' standard si besoin, mais fast_info est plus stable
-    full_info = stock.info 
+def set_ticker(name, ticker):
+    """Fonction déclenchée au clic sur un actif"""
+    st.session_state.selected_ticker = ticker
+    st.session_state.selected_name = name
+
+# --- FONCTIONS CACHÉES (PERFORMANCE) ---
+@st.cache_data(ttl=3600)
+def get_data(ticker):
+    stock = yf.Ticker(ticker)
+    info = stock.info
     hist = stock.history(period="1y")
-    return full_info, hist
+    return info, hist
 
-# On garde les news en mémoire pendant 3 heures
-@st.cache_data(ttl=10800, show_spinner=False)
-def get_company_news_cached(ticker_symbol):
-    """Récupère les dernières actualités financières avec cache"""
-    try:
-        ticker = yf.Ticker(ticker_symbol)
-        news = ticker.news
-        return news[:5]
-    except Exception:
-        return []
+@st.cache_data(ttl=3600)
+def get_news(ticker):
+    stock = yf.Ticker(ticker)
+    return stock.news[:4]
 
-def get_analyst_consensus(info):
-    """Récupère les données des analystes pro"""
-    target = info.get('targetMeanPrice', 0)
-    recommendation = info.get('recommendationKey', 'none').upper()
-    return target, recommendation
-
-
-# --- SIDEBAR & LOGO ---
+# --- SIDEBAR (NAVIGATION VERTICALE) ---
 with st.sidebar:
     try:
-        # Logo en petit (width=100) et en haut
-        st.image("image_2.png", width=120) 
+        st.image("image_2.png", width=140)
     except:
-        st.write("FHi")
-
-    st.title("🔐 Espace Membre")
-    user_password = st.text_input("Clé d'accès (Licence)", type="password")
-    # LE MOT DE PASSE EST DÉFINI ICI
-    IS_PREMIUM = user_password == "PRO2026"
-
-    if not IS_PREMIUM:
-        st.warning("Mode Gratuit.")
-        st.info("👉 Entrez votre clé pour débloquer l'analyse des banques.")
-        st.markdown("[Acheter une licence (19€)](https://gumroad.com)")
+        st.header("FHi")
+    
+    st.markdown("### 🧭 Navigation Marchés")
+    
+    # Menu principal
+    category = st.radio("Classe d'actifs", list(MARKET_DATA.keys()))
+    
+    st.markdown("---")
+    st.markdown("### 🔐 Compte Pro")
+    pwd = st.text_input("Code Licence", type="password")
+    IS_PREMIUM = pwd == "PRO2026"
+    
+    if IS_PREMIUM:
+        st.success("Mode TRADER Actif")
     else:
-        st.success("✅ Mode PRO Activé")
+        st.info("🔒 Mode Standard")
+        st.caption("Entrez le code pour voir les objectifs de prix des banques.")
 
 # --- PAGE PRINCIPALE ---
 
-# --- BANDEAU D'INDICES MONDIAUX ---
-st.markdown("### 🌍 Marchés en Direct")
-col1, col2, col3, col4, col5 = st.columns(5)
-# Valeurs statiques pour éviter de surcharger l'API au démarrage
-col1.metric("S&P 500", "Top US", "---") 
-col2.metric("CAC 40", "France", "---")
-col3.metric("Bitcoin", "Crypto", "---")
-col4.metric("Gold", "Matières", "---")
-col5.metric("Oil (WTI)", "Énergie", "---")
+# 1. ZONE DE SÉLECTION RAPIDE (DASHBOARD CATEGORIE)
+st.title(f"Marché : {category}")
+
+# Affichage des actifs de la catégorie choisie sous forme de grille
+cols = st.columns(4)
+assets_list = list(MARKET_DATA[category].items())
+
+for i, (name, ticker_sym) in enumerate(assets_list):
+    # On distribue les boutons dans les colonnes
+    col = cols[i % 4]
+    if col.button(f"🔎 {name}", key=f"btn_{ticker_sym}"):
+        set_ticker(name, ticker_sym)
+
 st.markdown("---")
 
-# --- RECHERCHE ET SÉLECTION ---
-st.header("🔎 Analyseur d'Actions FHi")
+# 2. ZONE DE DÉTAIL (L'ACTIF SÉLECTIONNÉ)
+current_ticker = st.session_state.selected_ticker
+current_name = st.session_state.selected_name
 
-search_mode = st.radio("Mode de recherche :", ["Liste Rapide (Top 50)", "Symbole Manuel (Expert)"], horizontal=True)
-
-if search_mode == "Liste Rapide (Top 50)":
-    stock_name = st.selectbox("Sélectionnez une entreprise :", list(POPULAR_STOCKS.keys()))
-    ticker = POPULAR_STOCKS[stock_name]
-else:
-    ticker = st.text_input("Entrez le symbole (ex: KO pour Coca-Cola, AIR.PA pour Airbus)", "AAPL")
-
-# --- CHARGEMENT DES DONNÉES CENTRALISÉ ---
-if ticker:
+if current_ticker:
     try:
-        # Utilisation de la fonction en CACHE
-        with st.spinner('Analyse FHi en cours...'):
-            info, hist = get_stock_data_cached(ticker)
-        
-        # Titre et Prix
-        current_price = info.get('currentPrice', info.get('regularMarketPreviousClose', 0))
+        info, hist = get_data(current_ticker)
+        curr_price = info.get('currentPrice', info.get('regularMarketPreviousClose', 0))
         currency = info.get('currency', 'USD')
-        long_name = info.get('longName', ticker)
         
-        st.subheader(f"{long_name} ({ticker})")
-        st.write(f"Secteur : **{info.get('sector', 'N/A')}** | Pays : **{info.get('country', 'N/A')}**")
-        
-        # --- ONGLETS (DASHBOARD) ---
-        tab1, tab2, tab3 = st.tabs(["📈 Vue d'ensemble", "📊 Données Financières", "💎 Analyse Banques (PRO)"])
+        # En-tête du produit
+        h1, h2 = st.columns([3, 1])
+        with h1:
+            st.header(f"{current_name} ({current_ticker})")
+            st.caption(f"Secteur: {info.get('sector', 'N/A')} | Pays: {info.get('country', 'N/A')}")
+        with h2:
+            st.metric("Prix Actuel", f"{curr_price} {currency}")
 
-        # --- TAB 1: OVERVIEW ---
-        with tab1:
-            m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Prix Actuel", f"{current_price} {currency}")
-            
-            low_52 = info.get('fiftyTwoWeekLow', 1)
-            if low_52 and current_price:
-                 var_52 = ((current_price - low_52)/low_52)*100
-                 m2.metric("Variation (52 sem)", f"{var_52:.1f}%")
-            else:
-                 m2.metric("Variation (52 sem)", "N/A")
+        # --- LES ONGLETS PRINCIPAUX ---
+        tab_view, tab_financials, tab_pro = st.tabs(["📈 Graphique & Vue", "💰 Données Financières", "🏦 Consensus Banques (PRO)"])
 
-            m3.metric("Volume Moyen", f"{info.get('averageVolume', 0)/1000000:.1f}M")
-            m4.metric("Capitalisation", f"{info.get('marketCap', 0)/1e9:.1f} Mrd")
-            
-            # Graphique Bougies (Candlestick) avec Plotly
+        # ONGLET 1 : GRAPHIQUE
+        with tab_view:
+            # Graphique interactif
             fig = go.Figure(data=[go.Candlestick(x=hist.index,
                             open=hist['Open'], high=hist['High'],
                             low=hist['Low'], close=hist['Close'])])
-            fig.update_layout(title="Graphique Interactif (1 An)", xaxis_rangeslider_visible=False, height=500)
+            fig.update_layout(height=500, xaxis_rangeslider_visible=False, margin=dict(l=0, r=0, t=20, b=0))
             st.plotly_chart(fig, use_container_width=True)
-
-        # --- TAB 2: FINANCIER ---
-        with tab2:
-            st.subheader("Les chiffres clés (Bilan)")
+            
+            # Mini Stats
             c1, c2, c3 = st.columns(3)
-            c1.info(f"PER (Prix/Bénéfice) : **{info.get('trailingPE', 'N/A')}**")
-            
-            div_yield = info.get('dividendYield')
-            if div_yield:
-                 c2.info(f"Dividende (Rendement) : **{div_yield*100:.2f}%**")
-            else:
-                 c2.info("Dividende : Aucun")
+            c1.info(f"Plus Haut (52s): {info.get('fiftyTwoWeekHigh', 'N/A')}")
+            c2.info(f"Plus Bas (52s): {info.get('fiftyTwoWeekLow', 'N/A')}")
+            c3.info(f"Volume Moyen: {info.get('averageVolume', 0)/1e6:.1f} M")
 
-            c3.info(f"Bénéfice par action (EPS) : **{info.get('trailingEps', 'N/A')}**")
-            
-            st.write("Description de l'entreprise :")
-            st.caption(info.get('longBusinessSummary', 'Pas de description disponible.'))
+        # ONGLET 2 : FINANCIER
+        with tab_financials:
+            col_f1, col_f2 = st.columns(2)
+            with col_f1:
+                st.subheader("Bilan")
+                st.write(f"**Capitalisation :** {info.get('marketCap', 0)/1e9:.2f} Mrd {currency}")
+                st.write(f"**Revenus (TTM) :** {info.get('totalRevenue', 0)/1e9:.2f} Mrd {currency}")
+                st.write(f"**Bénéfice (Profit) :** {info.get('grossProfits', 0)/1e9:.2f} Mrd {currency}")
+            with col_f2:
+                st.subheader("Ratios")
+                st.write(f"**PER (Price/Earnings) :** {info.get('trailingPE', 'N/A')}")
+                st.write(f"**P/B (Price/Book) :** {info.get('priceToBook', 'N/A')}")
+                st.write(f"**Dividende :** {info.get('dividendYield', 0)*100:.2f}%")
 
-        # --- TAB 3: PRO / BANQUES (PAYWALL) ---
-        with tab3:
-            st.header("💎 Consensus des Analystes")
+        # ONGLET 3 : PRO / BANQUES
+        with tab_pro:
+            st.subheader("🕵️‍♂️ Analyse des Institutionnels")
             
             if IS_PREMIUM:
-                # DONNÉES AVANCÉES
-                st.success("Accès Autorisé : Données bancaires débloquées.")
+                # Récupération données analystes
+                target = info.get('targetMeanPrice')
+                recommendation = info.get('recommendationKey', 'inconnu').upper().replace("_", " ")
+                num_analysts = info.get('numberOfAnalystOpinions', 0)
                 
-                # 1. ANALYSTE CONSENSUS
-                target_price, recom = get_analyst_consensus(info)
-                
-                # --- AFFICHAGE DASHBOARD PRO ---
-                st.markdown("### 🏦 Banques & Institutions")
-                col_pro1, col_pro2 = st.columns(2)
-
-                with col_pro1:
-                    if target_price and current_price:
-                        st.metric("Objectif de Cours Moyen (1 an)", f"{target_price} {currency}")
-                        if target_price > current_price:
-                            upside = ((target_price - current_price) / current_price) * 100
-                            st.write(f"Potentiel estimé : :green[**+{upside:.1f}%**]")
-                        else:
-                            st.write("Potentiel estimé : :red[Négatif]")
-                    else:
-                         st.write("Données d'objectif de cours indisponibles.")
-                
-                with col_pro2:
-                    st.write(f"Recommandation Majoritaire :")
-                    st.header(f"**{recom.replace('_', ' ')}**")
+                # Jauge de Consensus
+                c_pro1, c_pro2 = st.columns(2)
+                with c_pro1:
+                    st.metric("Objectif de Prix Moyen (Consensus)", f"{target} {currency}")
+                    if target and curr_price:
+                        upside = ((target - curr_price) / curr_price) * 100
+                        color = "green" if upside > 0 else "red"
+                        st.markdown(f"Potentiel : :{color}[**{upside:+.2f}%**]")
+                    
+                with c_pro2:
+                    st.metric("Recommandation", recommendation)
+                    st.caption(f"Basé sur {num_analysts} analystes professionnels.")
 
                 st.markdown("---")
-                st.subheader("Synthèse FHi")
+                st.markdown("#### 🔗 Sources & Rapports Externes")
+                st.write("Les données ci-dessus sont agrégées (Moyenne des notes Goldman Sachs, JP Morgan, Morgan Stanley...).")
                 
-                # Logique de synthèse simple basée sur les analystes
-                if target_price and current_price:
-                    if "BUY" in recom and target_price > current_price * 1.10:
-                        st.success("STRONG BUY (ACHAT FORT) : Les banques sont très optimistes. 🚀")
-                    elif "BUY" in recom or target_price > current_price:
-                        st.info("BUY (ACHAT) : Le consensus est positif. 📈")
-                    elif "HOLD" in recom:
-                        st.warning("HOLD (CONSERVER) : Les avis sont neutres. 🤔")
-                    else:
-                        st.error("SELL (VENDRE) : Les analystes recommandent la prudence ou la vente. 📉")
-                else:
-                     st.warning("Synthèse impossible : données insuffisantes.")
-                    
+                # Liens dynamiques pour la fiabilité
+                col_link1, col_link2 = st.columns(2)
+                with col_link1:
+                    # Lien vers Google News recherche spécifique
+                    search_query = f"{current_name} stock analyst rating"
+                    st.link_button("📰 Lire les articles récents (Presse)", f"https://www.google.com/search?q={search_query}&tbm=nws")
+                with col_link2:
+                    # Lien vers Yahoo Analysis
+                    st.link_button("📊 Détails Consensus (Yahoo Finance)", f"https://finance.yahoo.com/quote/{current_ticker}/analysis")
+
             else:
-                # ÉCRAN DE VENTE (SI PAS CONNECTÉ)
-                st.error("🔒 ANALYSE PRO BLOQUÉE")
-                
-                col_lock1, col_lock2 = st.columns([2, 1])
-                with col_lock1:
-                    st.write("""
-                    **Ne tradez plus seul. Suivez l'argent intelligent.**
-                    
-                    En débloquant la version PRO de FHi, vous voyez instantanément :
-                    * 🎯 **L'objectif de cours** précis des plus grandes banques d'affaires (Goldman Sachs, JP Morgan...).
-                    * ⚖️ **La Recommandation Officielle** du consensus (Achat, Vente, Conserver).
-                    * 🚦 **La synthèse FHi** claire et nette pour prendre votre décision.
-                    """)
-                with col_lock2:
-                    st.markdown("### Seulement 19€ / mois")
-                    st.button("🔓 DÉBLOQUER MAINTENANT") 
-                    st.caption("Entrez votre code licence dans le menu à gauche.")
-        
-        # --- SECTION ACTUALITÉS (EN DESSOUS DES ONGLETS) ---
+                st.error("🔒 Section Réservée aux membres FHi PRO")
+                st.write("Accédez aux objectifs de prix des banques et aux liens vers les rapports d'analystes.")
+
+        # --- ACTUALITÉS EN BAS DE PAGE ---
         st.markdown("---")
-        st.header("📰 Actualités Financières Récentes")
-        
-        # Utilisation de la fonction NEWS en CACHE
-        news_items = get_company_news_cached(ticker)
-        
-        if news_items:
-            st.write(f"Dernières nouvelles concernant **{long_name}**.")
-            for item in news_items:
-                # Convertir le timestamp en date lisible
-                pub_date = datetime.fromtimestamp(item.get('providerPublishTime', 0)).strftime('%d/%m/%Y %H:%M')
-                publisher = item.get('publisher', 'Source Inconnue')
-                title = item.get('title', 'Pas de titre')
-                link = item.get('link', '#')
-                
-                st.markdown(f"""
-                <div class="news-item">
-                    <a href="{link}" target="_blank" class="news-title">{title}</a>
-                    <br>
-                    <span class="news-source">Source : {publisher} | Date : {pub_date}</span>
-                </div>
-                """, unsafe_allow_html=True)
+        st.subheader(f"Dernières Infos : {current_name}")
+        news = get_news(current_ticker)
+        if news:
+            for n in news:
+                title = n.get('title')
+                link = n.get('link')
+                publisher = n.get('publisher')
+                st.markdown(f"- **[{title}]({link})** _(Source: {publisher})_")
         else:
-            st.write("Aucune actualité récente disponible ou erreur de chargement.")
+            st.caption("Pas d'actualités récentes disponibles.")
 
     except Exception as e:
-        st.warning(f"Erreur lors de la récupération des données. Si le problème persiste, Yahoo Finance limite peut-être les requêtes temporairement. Erreur : {e}")
-
-# Assure-toi que image_2.png est bien uploadé sur GitHub
+        st.error(f"Erreur de chargement pour {current_ticker}. Essayez un autre actif. ({e})")
