@@ -8,21 +8,28 @@ from datetime import datetime
 # --- CONFIGURATION DU SITE (Style FHi) ---
 st.set_page_config(page_title="FHi - Financial Health Index", layout="wide", page_icon="📈")
 
-# --- CSS PERSONNALISÉ POUR LE LOOK "TRADER" ---
+# --- CSS PERSONNALISÉ POUR LE LOOK "TRADER" ET LOGO ---
 st.markdown("""
 <style>
+    /* Style des cartes de métriques */
     .metric-card {background-color: #f0f2f6; border-radius: 10px; padding: 15px; text-align: center;}
+    /* Style des onglets */
     .stTabs [data-baseweb="tab-list"] {gap: 20px;}
     .stTabs [data-baseweb="tab"] {height: 50px; white-space: pre-wrap; background-color: #ffffff; border-radius: 5px;}
     .stTabs [aria-selected="true"] {background-color: #e6f3ff; color: #0068c9; font-weight: bold;}
+    /* Style des news */
     .news-item {padding: 10px; border-bottom: 1px solid #eee;}
     .news-title {font-weight: bold; color: #0068c9; text-decoration: none;}
     .news-source {font-size: 0.8em; color: #666;}
+    /* Style du Logo en Sidebar (Fondu et taille) */
+    [data-testid="stSidebar"] img {
+        opacity: 0.8; /* Effet de transparence pour le fondu */
+        margin-bottom: -20px; /* Remonte le logo vers le titre */
+    }
 </style>
 """, unsafe_allow_html=True)
 
 # --- DICTIONNAIRE DE MAPPING (NOM -> TICKER) ---
-# Pour simuler la recherche par nom (Top 50 Global + CAC40)
 POPULAR_STOCKS = {
     "Apple Inc.": "AAPL", "Microsoft": "MSFT", "NVIDIA": "NVDA", "Amazon": "AMZN", "Google (Alphabet)": "GOOGL",
     "Tesla": "TSLA", "Meta (Facebook)": "META", "Berkshire Hathaway": "BRK-B", "TSMC": "TSM",
@@ -33,7 +40,30 @@ POPULAR_STOCKS = {
     "Alibaba": "BABA", "Tencent": "TCEHY"
 }
 
-# --- FONCTIONS ---
+# --- FONCTIONS AVEC MISE EN CACHE (ANTI RATE-LIMIT) ---
+
+# On garde les données principales en mémoire pendant 2 heures (7200 secondes)
+@st.cache_data(ttl=7200, show_spinner=False)
+def get_stock_data_cached(ticker_symbol):
+    """Récupère infos et historique avec cache"""
+    stock = yf.Ticker(ticker_symbol)
+    # On force le téléchargement des données essentielles pour éviter les bugs de yfinance
+    info = stock.fast_info 
+    # On complète avec le 'info' standard si besoin, mais fast_info est plus stable
+    full_info = stock.info 
+    hist = stock.history(period="1y")
+    return full_info, hist
+
+# On garde les news en mémoire pendant 3 heures
+@st.cache_data(ttl=10800, show_spinner=False)
+def get_company_news_cached(ticker_symbol):
+    """Récupère les dernières actualités financières avec cache"""
+    try:
+        ticker = yf.Ticker(ticker_symbol)
+        news = ticker.news
+        return news[:5]
+    except Exception:
+        return []
 
 def get_analyst_consensus(info):
     """Récupère les données des analystes pro"""
@@ -41,48 +71,38 @@ def get_analyst_consensus(info):
     recommendation = info.get('recommendationKey', 'none').upper()
     return target, recommendation
 
-def get_company_news(ticker_symbol):
-    """Récupère les dernières actualités financières"""
+
+# --- SIDEBAR & LOGO ---
+with st.sidebar:
     try:
-        ticker = yf.Ticker(ticker_symbol)
-        news = ticker.news
-        return news[:5] # Retourne les 5 dernières news
-    except Exception:
-        return []
+        # Logo en petit (width=100) et en haut
+        st.image("image_2.png", width=120) 
+    except:
+        st.write("FHi")
 
-# --- SIDEBAR & AUTHENTIFICATION ---
-st.sidebar.title("🔐 Espace Membre FHi")
-user_password = st.sidebar.text_input("Clé d'accès (Licence)", type="password")
-# LE MOT DE PASSE EST DÉFINI ICI (Change le si tu veux)
-IS_PREMIUM = user_password == "PRO2026"
+    st.title("🔐 Espace Membre")
+    user_password = st.text_input("Clé d'accès (Licence)", type="password")
+    # LE MOT DE PASSE EST DÉFINI ICI
+    IS_PREMIUM = user_password == "PRO2026"
 
-if not IS_PREMIUM:
-    st.sidebar.warning("Mode Gratuit restreint.")
-    st.sidebar.info("👉 Entrez votre clé pour débloquer l'analyse des banques et les signaux d'achat.")
-    st.sidebar.markdown("[Acheter une licence (19€)](https://gumroad.com)") # Mets ton lien ici
-else:
-    st.sidebar.success("✅ Mode PRO Activé")
+    if not IS_PREMIUM:
+        st.warning("Mode Gratuit.")
+        st.info("👉 Entrez votre clé pour débloquer l'analyse des banques.")
+        st.markdown("[Acheter une licence (19€)](https://gumroad.com)")
+    else:
+        st.success("✅ Mode PRO Activé")
 
 # --- PAGE PRINCIPALE ---
-
-# --- LOGO FHi ---
-try:
-    st.image("image_2.png", width=200) # Assure-toi que le fichier image_2.png est dans le même dossier sur GitHub
-except:
-    st.title("FHi - Financial Health Index") # Fallback si l'image ne charge pas
 
 # --- BANDEAU D'INDICES MONDIAUX ---
 st.markdown("### 🌍 Marchés en Direct")
 col1, col2, col3, col4, col5 = st.columns(5)
-indices = {"S&P 500": "^GSPC", "Nasdaq": "^IXIC", "CAC 40": "^FCHI", "DAX": "^GDAXI", "Nikkei 225": "^N225"}
-
-# Pour l'affichage rapide des indices (optimisation pour ne pas ralentir)
-# Dans une version complète, on chargerait les vrais deltas.
-col1.metric("S&P 500", "Live", "+0.5%") 
-col2.metric("CAC 40", "Live", "-0.2%")
-col3.metric("Bitcoin", "Live", "+1.2%")
-col4.metric("Gold", "Live", "+0.1%")
-col5.metric("Oil (WTI)", "Live", "-0.5%")
+# Valeurs statiques pour éviter de surcharger l'API au démarrage
+col1.metric("S&P 500", "Top US", "---") 
+col2.metric("CAC 40", "France", "---")
+col3.metric("Bitcoin", "Crypto", "---")
+col4.metric("Gold", "Matières", "---")
+col5.metric("Oil (WTI)", "Énergie", "---")
 st.markdown("---")
 
 # --- RECHERCHE ET SÉLECTION ---
@@ -96,14 +116,12 @@ if search_mode == "Liste Rapide (Top 50)":
 else:
     ticker = st.text_input("Entrez le symbole (ex: KO pour Coca-Cola, AIR.PA pour Airbus)", "AAPL")
 
-# --- CHARGEMENT DES DONNÉES ---
+# --- CHARGEMENT DES DONNÉES CENTRALISÉ ---
 if ticker:
     try:
-        stock = yf.Ticker(ticker)
-        info = stock.info
-        
-        # Récupération historique (1 an)
-        hist = stock.history(period="1y")
+        # Utilisation de la fonction en CACHE
+        with st.spinner('Analyse FHi en cours...'):
+            info, hist = get_stock_data_cached(ticker)
         
         # Titre et Prix
         current_price = info.get('currentPrice', info.get('regularMarketPreviousClose', 0))
@@ -120,7 +138,14 @@ if ticker:
         with tab1:
             m1, m2, m3, m4 = st.columns(4)
             m1.metric("Prix Actuel", f"{current_price} {currency}")
-            m2.metric("Variation (52 sem)", f"{((current_price - info.get('fiftyTwoWeekLow', 0))/info.get('fiftyTwoWeekLow', 1))*100:.1f}%")
+            
+            low_52 = info.get('fiftyTwoWeekLow', 1)
+            if low_52 and current_price:
+                 var_52 = ((current_price - low_52)/low_52)*100
+                 m2.metric("Variation (52 sem)", f"{var_52:.1f}%")
+            else:
+                 m2.metric("Variation (52 sem)", "N/A")
+
             m3.metric("Volume Moyen", f"{info.get('averageVolume', 0)/1000000:.1f}M")
             m4.metric("Capitalisation", f"{info.get('marketCap', 0)/1e9:.1f} Mrd")
             
@@ -128,7 +153,7 @@ if ticker:
             fig = go.Figure(data=[go.Candlestick(x=hist.index,
                             open=hist['Open'], high=hist['High'],
                             low=hist['Low'], close=hist['Close'])])
-            fig.update_layout(title="Graphique Interactif", xaxis_rangeslider_visible=False)
+            fig.update_layout(title="Graphique Interactif (1 An)", xaxis_rangeslider_visible=False, height=500)
             st.plotly_chart(fig, use_container_width=True)
 
         # --- TAB 2: FINANCIER ---
@@ -136,7 +161,13 @@ if ticker:
             st.subheader("Les chiffres clés (Bilan)")
             c1, c2, c3 = st.columns(3)
             c1.info(f"PER (Prix/Bénéfice) : **{info.get('trailingPE', 'N/A')}**")
-            c2.info(f"Dividende (Rendement) : **{info.get('dividendYield', 0)*100:.2f}%**")
+            
+            div_yield = info.get('dividendYield')
+            if div_yield:
+                 c2.info(f"Dividende (Rendement) : **{div_yield*100:.2f}%**")
+            else:
+                 c2.info("Dividende : Aucun")
+
             c3.info(f"Bénéfice par action (EPS) : **{info.get('trailingEps', 'N/A')}**")
             
             st.write("Description de l'entreprise :")
@@ -158,12 +189,15 @@ if ticker:
                 col_pro1, col_pro2 = st.columns(2)
 
                 with col_pro1:
-                    st.metric("Objectif de Cours Moyen (1 an)", f"{target_price} {currency}")
-                    if target_price > current_price:
-                        upside = ((target_price - current_price) / current_price) * 100
-                        st.write(f"Potentiel estimé : :green[**+{upside:.1f}%**]")
+                    if target_price and current_price:
+                        st.metric("Objectif de Cours Moyen (1 an)", f"{target_price} {currency}")
+                        if target_price > current_price:
+                            upside = ((target_price - current_price) / current_price) * 100
+                            st.write(f"Potentiel estimé : :green[**+{upside:.1f}%**]")
+                        else:
+                            st.write("Potentiel estimé : :red[Négatif]")
                     else:
-                        st.write("Potentiel estimé : :red[Négatif]")
+                         st.write("Données d'objectif de cours indisponibles.")
                 
                 with col_pro2:
                     st.write(f"Recommandation Majoritaire :")
@@ -173,14 +207,17 @@ if ticker:
                 st.subheader("Synthèse FHi")
                 
                 # Logique de synthèse simple basée sur les analystes
-                if "BUY" in recom and target_price > current_price * 1.10:
-                    st.success("STRONG BUY (ACHAT FORT) : Les banques sont très optimistes. 🚀")
-                elif "BUY" in recom or target_price > current_price:
-                    st.info("BUY (ACHAT) : Le consensus est positif. 📈")
-                elif "HOLD" in recom:
-                    st.warning("HOLD (CONSERVER) : Les avis sont neutres. 🤔")
+                if target_price and current_price:
+                    if "BUY" in recom and target_price > current_price * 1.10:
+                        st.success("STRONG BUY (ACHAT FORT) : Les banques sont très optimistes. 🚀")
+                    elif "BUY" in recom or target_price > current_price:
+                        st.info("BUY (ACHAT) : Le consensus est positif. 📈")
+                    elif "HOLD" in recom:
+                        st.warning("HOLD (CONSERVER) : Les avis sont neutres. 🤔")
+                    else:
+                        st.error("SELL (VENDRE) : Les analystes recommandent la prudence ou la vente. 📉")
                 else:
-                    st.error("SELL (VENDRE) : Les analystes recommandent la prudence ou la vente. 📉")
+                     st.warning("Synthèse impossible : données insuffisantes.")
                     
             else:
                 # ÉCRAN DE VENTE (SI PAS CONNECTÉ)
@@ -198,19 +235,21 @@ if ticker:
                     """)
                 with col_lock2:
                     st.markdown("### Seulement 19€ / mois")
-                    st.button("🔓 DÉBLOQUER MAINTENANT") # Ici tu mettras ton lien Stripe
+                    st.button("🔓 DÉBLOQUER MAINTENANT") 
                     st.caption("Entrez votre code licence dans le menu à gauche.")
         
         # --- SECTION ACTUALITÉS (EN DESSOUS DES ONGLETS) ---
         st.markdown("---")
         st.header("📰 Actualités Financières Récentes")
-        st.write(f"Dernières nouvelles concernant **{long_name}** et son secteur.")
         
-        news_items = get_company_news(ticker)
+        # Utilisation de la fonction NEWS en CACHE
+        news_items = get_company_news_cached(ticker)
+        
         if news_items:
+            st.write(f"Dernières nouvelles concernant **{long_name}**.")
             for item in news_items:
                 # Convertir le timestamp en date lisible
-                pub_date = datetime.fromtimestamp(item['providerPublishTime']).strftime('%d/%m/%Y %H:%M')
+                pub_date = datetime.fromtimestamp(item.get('providerPublishTime', 0)).strftime('%d/%m/%Y %H:%M')
                 publisher = item.get('publisher', 'Source Inconnue')
                 title = item.get('title', 'Pas de titre')
                 link = item.get('link', '#')
@@ -223,7 +262,9 @@ if ticker:
                 </div>
                 """, unsafe_allow_html=True)
         else:
-            st.write("Aucune actualité récente trouvée pour cette entreprise.")
+            st.write("Aucune actualité récente disponible ou erreur de chargement.")
 
     except Exception as e:
-        st.error(f"Action non trouvée ou erreur de données : {e}")
+        st.warning(f"Erreur lors de la récupération des données. Si le problème persiste, Yahoo Finance limite peut-être les requêtes temporairement. Erreur : {e}")
+
+# Assure-toi que image_2.png est bien uploadé sur GitHub
