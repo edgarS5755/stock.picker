@@ -2,308 +2,251 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import plotly.graph_objects as go
+import google.generativeai as genai
 from datetime import datetime
 
 # --- 1. CONFIGURATION ---
-st.set_page_config(page_title="FHi Stock Picker", layout="wide", page_icon="📈", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="FHi Pro - Gemini Powered", layout="wide", page_icon="🧠", initial_sidebar_state="collapsed")
 
-# --- 2. CSS "DARK PICKER" (Cartes & Couleurs) ---
+# --- 2. CSS "DARK PREMIUM" ---
 st.markdown("""
 <style>
-    /* RESET */
-    .stApp { background-color: #050505; color: #e0e0e0; font-family: 'Helvetica Neue', sans-serif; }
+    .stApp { background-color: #000000; color: #e0e0e0; font-family: 'Roboto', sans-serif; }
     
-    /* NAVIGATION BAR */
-    .nav-bar {
-        position: fixed; top: 0; left: 0; width: 100%; height: 60px;
-        background: rgba(20, 20, 20, 0.9); backdrop-filter: blur(10px);
-        border-bottom: 1px solid #333; z-index: 999;
-        display: flex; align-items: center; padding: 0 20px;
-    }
-    
-    /* CARTES ACTIONS (STOCK PICKING) */
-    .stock-card {
-        background-color: #111; border: 1px solid #222; border-radius: 10px;
-        padding: 15px; text-align: center; margin-bottom: 10px;
-        transition: transform 0.2s, border-color 0.2s;
-    }
-    .stock-card:hover { border-color: #2962ff; transform: translateY(-2px); }
-    
-    /* COULEURS PRIX */
-    .price-big { font-size: 1.2rem; font-weight: bold; color: #fff; margin: 5px 0; }
-    .var-green { color: #00e676; font-weight: 600; font-size: 0.9rem; }
-    .var-red { color: #ff1744; font-weight: 600; font-size: 0.9rem; }
-    .ticker-name { color: #888; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 1px; }
-    
-    /* BOUTONS STREAMLIT CUSTOM */
-    div.stButton > button {
-        width: 100%; border-radius: 6px; background-color: #1e1e1e; color: #fff; border: 1px solid #333;
-    }
-    div.stButton > button:hover { border-color: #fff; color: #fff; }
+    /* Input API Key */
+    .stTextInput input[type="password"] { background-color: #1a1a1a; color: #00e676; border: 1px solid #333; }
 
-    /* ONGLETS */
-    .stTabs [data-baseweb="tab-list"] { border-bottom: 1px solid #333; gap: 15px; }
-    .stTabs [aria-selected="true"] { color: #2962ff !important; border-bottom-color: #2962ff !important; }
+    /* Cartes Actions */
+    .stock-card {
+        background-color: #111; border: 1px solid #333; border-radius: 8px; padding: 15px; text-align: center;
+        transition: transform 0.2s;
+    }
+    .stock-card:hover { border-color: #007bff; transform: translateY(-3px); }
+    .big-price { font-size: 1.5rem; font-weight: 700; color: #fff; }
+    .pos { color: #00e676; } .neg { color: #ff1744; }
+
+    /* Onglets */
+    .stTabs [data-baseweb="tab-list"] { border-bottom: 1px solid #333; }
+    .stTabs [aria-selected="true"] { color: #007bff !important; border-bottom-color: #007bff !important; }
     
-    /* HIDE SIDEBAR */
-    [data-testid="stSidebar"] { display: none; }
-    
-    /* NEWS */
-    .news-item { padding: 10px 0; border-bottom: 1px solid #222; }
-    .news-title { color: #fff; text-decoration: none; font-weight: 600; }
-    .news-source { color: #666; font-size: 0.8rem; }
+    /* Chatbot */
+    .stChatMessage { background-color: #111; border-radius: 10px; border: 1px solid #222; }
 </style>
 """, unsafe_allow_html=True)
 
 # --- 3. STATE MANAGEMENT ---
 if 'view' not in st.session_state: st.session_state.view = 'home'
 if 'ticker' not in st.session_state: st.session_state.ticker = None
+if 'api_key' not in st.session_state: st.session_state.api_key = ""
 
 def navigate(to, symbol=None):
     st.session_state.view = to
-    if symbol: st.session_state.ticker = symbol
+    if symbol: 
+        st.session_state.ticker = symbol
+        st.session_state.messages = [] # Reset chat
 
-# --- 4. DONNÉES DE STOCK PICKING (NICHES) ---
-NICHES = {
-    "🧠 IA & Data": ["PLTR", "NVDA", "SNOW", "DDOG", "AMD"],
-    "🛡️ Cybersecurité": ["PANW", "CRWD", "FTNT", "NET"],
-    "☢️ Énergie & Uranium": ["CCJ", "URA", "NEE", "ENPH", "FSLR"],
-    "💎 Luxe & Rareté": ["MC.PA", "RMS.PA", "RACE.MI", "CDI.PA"],
-    "💊 BioTech (Risqué)": ["CRSP", "MRNA", "BNTX", "VLA.PA"]
-}
-
-# --- 5. FONCTIONS DATA (ROBUSTES) ---
-@st.cache_data(ttl=300)
-def get_quote_safe(symbol):
-    """Récupère prix et variation sans planter"""
+# --- 4. DATA FUNCTIONS ---
+@st.cache_data(ttl=60)
+def get_live_quote(symbol):
     try:
         t = yf.Ticker(symbol)
-        # Fast info est plus rapide et stable
         price = t.fast_info.last_price
         prev = t.fast_info.previous_close
-        if price and prev:
-            change = ((price - prev) / prev) * 100
-            return price, change
-        return 0.0, 0.0
-    except:
-        return 0.0, 0.0
+        return price, ((price - prev)/prev)*100
+    except: return 0.0, 0.0
 
-@st.cache_data(ttl=1800)
-def get_full_details(symbol):
+@st.cache_data(ttl=900)
+def get_details(symbol):
     try:
         t = yf.Ticker(symbol)
-        return t.info, t.history(period="1y"), t.news
-    except: return None, None, None
+        return t.info, t.history(period="1y")
+    except: return None, None
 
-def bot_brain(query, info, symbol):
-    """
-    Le Cerveau du Bot: Analyse les vrais chiffres pour répondre.
-    """
-    q = query.lower()
-    name = info.get('shortName', symbol)
-    summary = info.get('longBusinessSummary', '')
+@st.cache_data(ttl=300)
+def get_chart_data(symbol, period):
+    try:
+        t = yf.Ticker(symbol)
+        # Ajustement intervalle
+        interval = "1d"
+        if period in ["1mo", "3mo"]: interval = "1d"
+        elif period in ["5d"]: interval = "15m"
+        else: interval = "1wk"
+        return t.history(period=period, interval=interval)
+    except: return pd.DataFrame()
+
+# --- 5. INTELLIGENCE GEMINI (VRAIE IA) ---
+def ask_gemini_real(api_key, query, info, symbol, hist_data):
+    """Envoie les données financières brutes à Gemini pour analyse"""
+    if not api_key:
+        return "⚠️ Veuillez entrer votre Clé API Gemini dans le menu (Barre latérale ou haut de page) pour activer l'intelligence."
     
-    # 1. ANALYSE FONDAMENTALE (SI DEMANDÉ AVIS)
-    if any(x in q for x in ["avis", "acheter", "bon coup", "investir", "analyse"]):
-        # Récupération des ratios clés
-        target = info.get('targetMeanPrice')
-        current = info.get('currentPrice')
-        peg = info.get('pegRatio') # Price/Earnings-to-Growth (Top indicateur)
-        margins = info.get('profitMargins', 0)
+    try:
+        # Configuration
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel('gemini-1.5-flash')
         
-        analysis = f"**Analyse FHi pour {name} :**\n\n"
+        # Préparation du contexte financier pour l'IA
+        context = f"""
+        Tu es FHi Bot, un analyste financier expert de Wall Street.
+        Analyse l'action : {info.get('shortName')} ({symbol}).
         
-        # Logique Valorisation
-        if target and current:
-            upside = ((target - current) / current) * 100
-            analysis += f"🎯 **Potentiel :** Les analystes visent {target} ({upside:+.1f}%).\n"
+        DONNÉES FINANCIÈRES EN TEMPS RÉEL :
+        - Prix actuel : {info.get('currentPrice')} {info.get('currency')}
+        - Secteur : {info.get('sector')}
+        - PER (Price Earnings) : {info.get('trailingPE')}
+        - Objectif Analystes : {info.get('targetMeanPrice')}
+        - Recommandation Consensus : {info.get('recommendationKey')}
+        - Marge Nette : {info.get('profitMargins')}
+        - Dette/Equity : {info.get('debtToEquity')}
+        - Cash Flow Libre : {info.get('freeCashflow')}
         
-        # Logique Rentabilité
-        if margins > 0.20:
-            analysis += f"✅ **Rentabilité :** Excellente marge nette de {margins*100:.1f}% (Cash Machine).\n"
-        elif margins < 0:
-            analysis += f"⚠️ **Attention :** L'entreprise n'est pas encore rentable (Marge {margins*100:.1f}%).\n"
-            
-        # Logique Prix (PEG)
-        if peg and peg < 1:
-            analysis += f"💎 **Valorisation :** L'action est sous-évaluée par rapport à sa croissance (PEG < 1).\n"
-        elif peg and peg > 3:
-            analysis += f"🔥 **Valorisation :** L'action est chère (PEG élevé), le marché attend beaucoup.\n"
-            
-        return analysis + "\n*Ceci est une aide à la décision, pas un conseil financier.*"
+        QUESTION DE L'UTILISATEUR : "{query}"
+        
+        CONSIGNES :
+        1. Sois direct, professionnel et utilise les chiffres fournis.
+        2. Si l'utilisateur demande un avis, base-toi sur le consensus et les ratios (PER, Marges).
+        3. Fais des phrases courtes et impactantes. Utilise des emojis financiers.
+        4. Ne dis jamais "Je suis une IA", dis "L'analyse FHi indique...".
+        """
+        
+        response = model.generate_content(context)
+        return response.text
+    except Exception as e:
+        return f"Erreur de connexion à Gemini : {e}. Vérifiez votre clé API."
 
-    # 2. HISTOIRE & ACTIVITÉ
-    if any(x in q for x in ["histoire", "fait quoi", "activite", "business"]):
-        return f"**Activité de {name} :**\n\n{summary[:600]}... (Traduit de Yahoo Finance)"
-
-    # 3. RISQUE
-    if "risque" in q:
-        beta = info.get('beta', 1)
-        debt = info.get('debtToEquity', 0)
-        
-        risk_msg = f"**Profil de Risque :**\n\n"
-        if beta > 1.5: risk_msg += f"🌊 **Volatilité :** Très élevée (Beta {beta}). Ça bouge fort !\n"
-        else: risk_msg += f"🛡️ **Volatilité :** Faible/Moyenne (Beta {beta}). Plutôt stable.\n"
-        
-        if debt > 200: risk_msg += f"⚠️ **Dette :** Attention, niveau d'endettement élevé ({debt}%).\n"
-        
-        return risk_msg
-
-    return f"Je suis l'assistant FHi spécialisé sur {name}. Demandez-moi une **analyse**, son **histoire** ou son **niveau de risque**."
-
-# --- 6. NAVIGATION BAR (SIMULÉE) ---
-c1, c2, c3 = st.columns([1, 4, 1])
+# --- 6. BARRE DE NAVIGATION ---
+c1, c2, c3, c4 = st.columns([1, 2, 4, 1])
 with c1:
-    if st.button("🏠 FHi Accueil"): navigate('home')
+    if st.button("🏠 ACCUEIL"): navigate('home')
 with c2:
-    # Barre de recherche globale
-    search = st.text_input("Recherche (Symbole)", label_visibility="collapsed", placeholder="Ex: TSLA, LVMH...").upper()
+    # Champ pour la clé API (Mot de passe)
+    api_k = st.text_input("🔑 Clé Gemini API", type="password", placeholder="Collez votre clé ici...", key="input_key")
+    if api_k: st.session_state.api_key = api_k
+with c3:
+    search = st.text_input("Recherche", placeholder="Ex: Nvidia, LVMH...", label_visibility="collapsed").upper()
     if search:
-        # Mapping manuel rapide pour les noms courants
-        map_fix = {"LVMH": "MC.PA", "TOTAL": "TTE.PA", "APPLE": "AAPL"}
-        target = map_fix.get(search, search)
+        # Mapping rapide
+        mapping = {"TOTAL": "TTE.PA", "LVMH": "MC.PA", "APPLE": "AAPL"}
+        target = mapping.get(search, search)
         navigate('terminal', target)
         st.rerun()
-with c3:
+with c4:
     if st.session_state.ticker:
         if st.button(f"📊 {st.session_state.ticker}"): navigate('terminal')
 
 st.markdown("---")
 
-# --- 7. VUE ACCUEIL (STOCK PICKING) ---
+# --- 7. VUE ACCUEIL ---
 if st.session_state.view == 'home':
-    st.title("Sélection de Pépites par Secteur")
-    st.caption("FHi Stock Picker : Identifiez les opportunités de marché.")
-
-    # Onglets des Niches
+    st.title("Market Opportunities")
+    
+    NICHES = {
+        "🚀 AI & Chips": ["NVDA", "AMD", "TSM", "PLTR", "AVGO"],
+        "🛡️ Cyber & Cloud": ["CRWD", "PANW", "SNOW", "MSFT", "GOOGL"],
+        "🏰 Luxe & Retail": ["MC.PA", "RMS.PA", "KER.PA", "NKE", "COST"],
+        "₿ Crypto Assets": ["BTC-USD", "ETH-USD", "COIN", "MSTR", "SOL-USD"]
+    }
+    
     tabs = st.tabs(list(NICHES.keys()))
     
-    for i, (niche_name, tickers) in enumerate(NICHES.items()):
+    for i, (name, tickers) in enumerate(NICHES.items()):
         with tabs[i]:
-            # Grille de 4 colonnes
-            cols = st.columns(4)
+            cols = st.columns(5)
             for j, t in enumerate(tickers):
-                col = cols[j % 4]
+                p, chg = get_live_quote(t)
+                color = "pos" if chg >= 0 else "neg"
+                sign = "+" if chg >= 0 else ""
                 
-                # Récupération Data Rapide
-                p, var = get_quote_safe(t)
-                
-                # Définition Couleur et Signe
-                color_class = "var-green" if var >= 0 else "var-red"
-                sign = "+" if var >= 0 else ""
-                
-                # Affichage Carte dans la Colonne
-                with col:
-                    with st.container(border=True): # Cadre visuel
-                        st.markdown(f"<div class='ticker-name'>{t}</div>", unsafe_allow_html=True)
-                        st.markdown(f"<div class='price-big'>{p:,.2f}</div>", unsafe_allow_html=True)
-                        st.markdown(f"<div class='{color_class}'>{sign}{var:.2f}%</div>", unsafe_allow_html=True)
-                        
-                        # Bouton d'action
-                        if st.button("Analyser 🔎", key=f"btn_{t}"):
+                with cols[j % 5]:
+                    with st.container():
+                        st.markdown(f"""
+                        <div class="stock-card">
+                            <div style="color:#888;">{t}</div>
+                            <div class="big-price">{p:,.2f}</div>
+                            <div class="{color}">{sign}{chg:.2f}%</div>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        if st.button("Analyser", key=f"btn_{t}"):
                             navigate('terminal', t)
                             st.rerun()
 
-    # Section Actualités (Correction du bug)
-    st.markdown("---")
-    st.subheader("Dernières Actualités Générales")
-    
-    # On prend le SP500 comme proxy pour les news globales
-    _, _, news_items = get_full_details("^GSPC")
-    
-    if news_items:
-        # On affiche 3 colonnes de news
-        news_cols = st.columns(3)
-        count = 0
-        for item in news_items:
-            # Sécurité : on vérifie que le titre et le lien existent
-            title = item.get('title')
-            link = item.get('link')
-            pub = item.get('publisher', 'Presse')
-            
-            # Gestion Image sécurisée
-            img_url = "https://via.placeholder.com/300x150?text=FHi+News"
-            try:
-                if 'thumbnail' in item and 'resolutions' in item['thumbnail']:
-                    img_url = item['thumbnail']['resolutions'][0]['url']
-            except: pass
-
-            if title and link:
-                with news_cols[count % 3]:
-                    st.image(img_url, use_container_width=True)
-                    st.markdown(f"**[{title}]({link})**")
-                    st.caption(f"Source : {pub}")
-                    st.markdown("---")
-                count += 1
-                if count >= 6: break # Max 6 news
-
-# --- 8. VUE TERMINAL (FICHE ACTION) ---
+# --- 8. VUE TERMINAL ---
 elif st.session_state.view == 'terminal':
     sym = st.session_state.ticker
-    
-    if not sym:
-        st.warning("Veuillez sélectionner une action.")
-        st.stop()
-
-    info, hist, news = get_full_details(sym)
+    info, hist_1y = get_details(sym)
     
     if info:
-        # En-tête Action
+        # HEADER
         c1, c2 = st.columns([3, 1])
         with c1:
             st.title(f"{info.get('shortName', sym)}")
-            st.caption(f"Secteur : {info.get('sector', 'N/A')} | Pays : {info.get('country', 'N/A')}")
+            st.caption(f"{info.get('sector')} • {info.get('industry')}")
         with c2:
-            p = info.get('currentPrice', info.get('regularMarketPreviousClose'))
-            curr = info.get('currency', 'USD')
-            st.metric("Cours", f"{p} {curr}")
+            st.markdown(f"<div class='big-price' style='text-align:right'>{info.get('currentPrice')} {info.get('currency')}</div>", unsafe_allow_html=True)
 
-        # Onglets
-        t_chart, t_fund, t_bot = st.tabs(["Graphique", "Fondamentaux", "🤖 Analyse IA"])
+        # ONGLETS
+        t1, t2, t3 = st.tabs(["Graphique", "Données", "🧠 Assistant Gemini"])
 
-        with t_chart:
-            if hist is not None:
-                fig = go.Figure(data=[go.Candlestick(x=hist.index, open=hist['Open'], high=hist['High'], low=hist['Low'], close=hist['Close'])])
+        # GRAPH
+        with t1:
+            periods = ["1d", "5d", "1mo", "6mo", "1y", "5y"]
+            sel_p = st.select_slider("Période", options=periods, value="1y")
+            df = get_chart_data(sym, sel_p)
+            
+            if not df.empty:
+                # Perf calcul
+                start = df['Close'].iloc[0]
+                end = df['Close'].iloc[-1]
+                perf = ((end-start)/start)*100
+                col_perf = "green" if perf >= 0 else "red"
+                st.markdown(f"Performance : <span style='color:{col_perf}; font-weight:bold'>{perf:+.2f}%</span>", unsafe_allow_html=True)
+                
+                fig = go.Figure(data=[go.Candlestick(x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'])])
                 fig.update_layout(template="plotly_dark", height=500, xaxis_rangeslider_visible=False, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
                 st.plotly_chart(fig, use_container_width=True)
 
-        with t_fund:
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Capitalisation", f"{info.get('marketCap', 0)/1e9:.1f} Mrd")
-            c2.metric("PER (Price/Earnings)", f"{info.get('trailingPE', '-')}")
-            c3.metric("Croissance Revenus", f"{info.get('revenueGrowth', 0)*100:.1f}%")
-            c4.metric("Dette/Equity", f"{info.get('debtToEquity', '-')}")
+        # DATA
+        with t2:
+            st.subheader("Indicateurs Clés")
+            k1, k2, k3, k4 = st.columns(4)
             
-            st.write("---")
-            st.subheader("Description")
-            st.write(info.get('longBusinessSummary', 'Pas de description.'))
+            def fmt(v, is_percent=False):
+                if v is None: return "-"
+                if is_percent: return f"{v*100:.2f}%"
+                return f"{v:,.2f}"
 
-        with t_bot:
-            st.subheader(f"🤖 L'Analyste Virtuel FHi sur {sym}")
-            st.info("Posez une question pour déclencher l'analyse de nos algorithmes.")
+            k1.metric("Capitalisation", f"{info.get('marketCap', 0)/1e9:.2f} Mrd")
+            k2.metric("PER (Price/Earnings)", fmt(info.get('trailingPE')))
+            k3.metric("Marge Nette", fmt(info.get('profitMargins'), True))
+            k4.metric("Dette/Equity", fmt(info.get('debtToEquity')))
             
-            # Chatbot simple
+            st.divider()
+            st.write(info.get('longBusinessSummary'))
+
+        # GEMINI CHAT
+        with t3:
+            st.markdown("### 🤖 Analyse par Google Gemini")
+            if not st.session_state.api_key:
+                st.warning("👈 Entrez votre clé API Gemini dans la barre du haut pour activer l'IA.")
+            else:
+                st.success("Gemini connecté & prêt à analyser.")
+
+            # Historique
             if "messages" not in st.session_state: st.session_state.messages = []
-            
-            # Reset historique si changement d'action
-            if 'last_sym' not in st.session_state or st.session_state['last_sym'] != sym:
-                st.session_state.messages = []
-                st.session_state['last_sym'] = sym
-
-            # Affichage
             for m in st.session_state.messages:
                 with st.chat_message(m["role"]): st.write(m["content"])
 
             # Input
-            q = st.chat_input("Ex: Est-ce risqué ? Quel est ton avis ?")
-            if q:
-                st.chat_message("user").write(q)
-                st.session_state.messages.append({"role": "user", "content": q})
+            if prompt := st.chat_input(f"Posez une question sur {sym} à Gemini..."):
+                st.chat_message("user").write(prompt)
+                st.session_state.messages.append({"role": "user", "content": prompt})
                 
-                with st.spinner("Analyse des ratios financiers..."):
-                    resp = bot_brain(q, info, sym)
-                    st.chat_message("assistant").write(resp)
-                    st.session_state.messages.append({"role": "assistant", "content": resp})
+                with st.spinner("Gemini analyse les rapports financiers..."):
+                    # APPEL À LA VRAIE IA
+                    response = ask_gemini_real(st.session_state.api_key, prompt, info, sym, hist_1y)
+                    
+                    st.chat_message("assistant").write(response)
+                    st.session_state.messages.append({"role": "assistant", "content": response})
 
     else:
-        st.error("Impossible de récupérer les données. Vérifiez le symbole.")
+        st.error("Données indisponibles.")
